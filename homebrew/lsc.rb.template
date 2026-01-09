@@ -1,0 +1,37 @@
+# This is a template showing what GoReleaser will generate.
+# The actual formula is auto-pushed to wfh/homebrew-tap on release.
+
+class Lsc < Formula
+  desc "CLI for chatting with LangSmith deployments"
+  homepage "https://github.com/wfh/lsc"
+  version "0.1.0"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/wfh/lsc/releases/download/v#{version}/lsc_#{version}_darwin_arm64.tar.gz"
+      sha256 "PLACEHOLDER"
+    else
+      url "https://github.com/wfh/lsc/releases/download/v#{version}/lsc_#{version}_darwin_amd64.tar.gz"
+      sha256 "PLACEHOLDER"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/wfh/lsc/releases/download/v#{version}/lsc_#{version}_linux_arm64.tar.gz"
+      sha256 "PLACEHOLDER"
+    else
+      url "https://github.com/wfh/lsc/releases/download/v#{version}/lsc_#{version}_linux_amd64.tar.gz"
+      sha256 "PLACEHOLDER"
+    end
+  end
+
+  def install
+    bin.install "lsc"
+  end
+
+  test do
+    system "#{bin}/lsc", "--help"
+  end
+end

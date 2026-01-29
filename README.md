@@ -19,10 +19,10 @@ brew tap wfh/tap
 brew install lsc
 ```
 
-### Go
+### Cargo
 
 ```bash
-go install github.com/wfh/lsc@latest
+cargo install --git https://github.com/wfh/lsc.git
 ```
 
 ### From Source
@@ -31,7 +31,7 @@ go install github.com/wfh/lsc@latest
 git clone https://github.com/wfh/lsc.git
 cd lsc
 make build
-./lsc
+./target/release/lsc
 ```
 
 ## Usage
@@ -73,9 +73,9 @@ Config is stored at `~/.lsc/config.yaml`
 ## Development
 
 ```bash
-make build     # Build binary
+make build     # Build the binary
 make test      # Run tests
-make lint      # Run linter
+make lint      # Run clippy
 make format    # Format code
 ```
 

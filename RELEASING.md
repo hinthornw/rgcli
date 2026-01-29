@@ -1,10 +1,10 @@
-# Releasing lsc
+# Releasing lsc (Rust)
 
 ## One-time Setup
 
 ### 1. Create the Homebrew Tap Repository
 
-Create a new GitHub repository called `homebrew-tap`:
+Create a GitHub repository called `homebrew-tap`:
 
 ```bash
 # On GitHub, create: wfh/homebrew-tap
@@ -43,11 +43,7 @@ GoReleaser needs a token to push to the homebrew-tap repo:
 
 ## Making a Release
 
-### 1. Update Version (optional)
-
-The version comes from the git tag, but update any hardcoded references if needed.
-
-### 2. Commit and Tag
+### 1. Commit and Tag
 
 ```bash
 git add .
@@ -56,7 +52,7 @@ git tag v0.1.0
 git push origin main --tags
 ```
 
-### 3. Watch the Release
+### 2. Watch the Release
 
 The GitHub Action will:
 1. Build binaries for darwin/linux (amd64/arm64)
@@ -65,7 +61,7 @@ The GitHub Action will:
 
 Check progress at: https://github.com/wfh/lsc/actions
 
-### 4. Verify Installation
+### 3. Verify Installation
 
 ```bash
 brew tap wfh/tap

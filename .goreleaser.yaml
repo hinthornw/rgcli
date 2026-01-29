@@ -4,20 +4,20 @@ project_name: lsc
 
 before:
   hooks:
-    - go mod tidy
+    - cargo fetch
 
 builds:
-  - env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w -X main.version={{.Version}}
+  - builder: cargo
     binary: lsc
+    flags:
+      - --release
+    env:
+      - LSC_VERSION={{.Version}}
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
 
 archives:
   - format: tar.gz

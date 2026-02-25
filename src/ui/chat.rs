@@ -26,7 +26,23 @@ const ESC_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_INPUT_LINES: usize = 5;
 const PLACEHOLDER: &str = "Type a message... (Alt+Enter for newline)";
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const THINKING_VERBS: &[&str] = &[
+    "thinking", "pondering", "contemplating", "musing", "cogitating",
+    "ruminating", "deliberating", "mulling", "noodling", "brainstorming",
+];
 const TOOL_RESULT_MAX_LEN: usize = 200;
+const TIPS: &[&str] = &[
+    "Press F12 to toggle devtools with TTFT and token metrics",
+    "Use /attach <file> to send images to multimodal agents",
+    "Use /assistant to switch between different graph assistants",
+    "Use /context <name> to switch deployment contexts on the fly",
+    "Pipe mode: echo \"question\" | ailsd for non-interactive use",
+    "Use ailsd bench to load test your deployment",
+    "Use ailsd logs to browse recent run traces",
+    "Use ailsd doctor to diagnose connectivity issues",
+    "Double-tap Esc to cancel a streaming response",
+    "Use /export to save the conversation as markdown",
+];
 
 #[derive(Debug)]
 pub enum ChatExit {
@@ -51,6 +67,7 @@ enum Action {
     Attach(String),
     ListAssistants,
     SwitchAssistant(String),
+    Export,
 }
 
 #[derive(Clone)]
@@ -260,6 +277,13 @@ pub async fn run_chat_loop(
         &chat_config.context_info,
         deploy_info.as_deref(),
     );
+    // Add a random tip
+    app.welcome_lines.push(Line::default());
+    app.welcome_lines.push(Line::from(Span::styled(
+        format!("  tip: {}", random_tip()),
+        Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+    )));
+
     app.context_names = chat_config.context_names.clone();
 
     // Load history with tool call support
@@ -398,6 +422,10 @@ async fn run_event_loop(
                         app.messages.push(ChatMessage::System(
                             format!("Switched to assistant: {id}"),
                         ));
+                        reset_textarea(app);
+                    }
+                    Action::Export => {
+                        export_conversation(app);
                         reset_textarea(app);
                     }
                     Action::None => {}
@@ -646,9 +674,11 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     } else if app.is_waiting {
         let frame_idx = app.spinner_idx % SPINNER_FRAMES.len();
         let spinner = SPINNER_FRAMES[frame_idx];
+        let verb_idx = (app.spinner_idx / 8) % THINKING_VERBS.len();
+        let verb = THINKING_VERBS[verb_idx];
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
-            format!("{} Thinking...", spinner),
+            format!("{spinner} {verb}..."),
             styles::system_style_r(),
         )));
     }
@@ -1190,6 +1220,9 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
                     return Action::Attach(path.to_string());
                 }
             }
+            if value == "/export" {
+                return Action::Export;
+            }
             if value == "/assistants" || value == "/assistant" {
                 return Action::ListAssistants;
             }
@@ -1447,6 +1480,58 @@ fn list_assistants(app: &mut App) {
     app.auto_scroll = true;
 }
 
+fn export_conversation(app: &mut App) {
+    let mut md = String::new();
+    for msg in &app.messages {
+        match msg {
+            ChatMessage::User(text) => {
+                md.push_str(&format!("**You:** {text}\n\n"));
+            }
+            ChatMessage::Assistant(text) => {
+                md.push_str(&format!("**Assistant:** {text}\n\n"));
+            }
+            ChatMessage::ToolUse(name, args) => {
+                md.push_str(&format!("> Tool: `{name}({args})`\n\n"));
+            }
+            ChatMessage::ToolResult(name, content) => {
+                md.push_str(&format!("> Result ({name}): {content}\n\n"));
+            }
+            ChatMessage::System(text) => {
+                md.push_str(&format!("*{text}*\n\n"));
+            }
+            ChatMessage::Error(text) => {
+                md.push_str(&format!("**Error:** {text}\n\n"));
+            }
+        }
+    }
+
+    let filename = format!(
+        "ailsd-export-{}.md",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    );
+    match std::fs::write(&filename, &md) {
+        Ok(()) => {
+            app.messages.push(ChatMessage::System(format!(
+                "Exported conversation to {filename}"
+            )));
+        }
+        Err(e) => {
+            app.messages
+                .push(ChatMessage::Error(format!("Export failed: {e}")));
+        }
+    }
+    app.auto_scroll = true;
+}
+
+fn random_tip() -> &'static str {
+    let idx = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as usize
+        % TIPS.len();
+    TIPS[idx]
+}
+
 // --- Slash commands ---
 
 #[allow(dead_code)]
@@ -1479,6 +1564,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/configure",
         desc: "Update connection settings",
+    },
+    SlashCommand {
+        name: "/export",
+        desc: "Export conversation to markdown",
     },
     SlashCommand {
         name: "/clear",

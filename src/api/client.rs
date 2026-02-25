@@ -1,13 +1,16 @@
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderName, HeaderValue};
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::api::sse::{
     SseEvent, extract_run_id, is_end_event, is_message_event, is_metadata_event, parse_sse,
 };
 use crate::api::types::{
-    Thread, ThreadState, is_ai_chunk, message_chunk_content, new_run_request, parse_message_chunk,
+    Attachment, Thread, ThreadState, extract_tool_calls, is_ai_chunk, is_tool_chunk,
+    message_chunk_content, new_resume_request, new_run_request, new_run_request_with_attachments,
+    parse_message_chunk,
 };
 use crate::config::Config;
 
@@ -20,6 +23,10 @@ pub enum StreamEvent {
     NewMessage(String),
     /// A text token from the assistant.
     Token(String),
+    /// Tool call detected (name, args).
+    ToolUse(String, String),
+    /// Tool result received (tool name, content).
+    ToolResult(String, String),
     /// Stream completed (Ok or Err).
     Done(Result<()>),
 }
@@ -127,7 +134,6 @@ impl Client {
     }
 
     /// Start a streaming run, sending events through the provided channel.
-    /// This is meant to be called from a spawned task.
     pub async fn stream_run(
         &self,
         thread_id: &str,
@@ -148,6 +154,36 @@ impl Client {
         let _ = tx.send(StreamEvent::Done(result));
     }
 
+    /// Start a streaming run with file attachments.
+    pub async fn stream_run_with_attachments(
+        &self,
+        thread_id: &str,
+        assistant_id: &str,
+        user_message: &str,
+        attachments: &[Attachment],
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) {
+        let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
+        let run_req =
+            new_run_request_with_attachments(assistant_id, user_message, attachments, None);
+        let result = self.do_stream(&url, &run_req, tx).await;
+        let _ = tx.send(StreamEvent::Done(result));
+    }
+
+    /// Resume an interrupted run (human-in-the-loop).
+    pub async fn resume_run(
+        &self,
+        thread_id: &str,
+        assistant_id: &str,
+        input: Option<Value>,
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) {
+        let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
+        let run_req = new_resume_request(assistant_id, input);
+        let result = self.do_stream(&url, &run_req, tx).await;
+        let _ = tx.send(StreamEvent::Done(result));
+    }
+
     async fn stream_run_inner(
         &self,
         thread_id: &str,
@@ -158,12 +194,21 @@ impl Client {
     ) -> Result<()> {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
         let run_req = new_run_request(assistant_id, user_message, multitask_strategy);
+        self.do_stream(&url, &run_req, tx).await
+    }
+
+    async fn do_stream(
+        &self,
+        url: &str,
+        run_req: &crate::api::types::RunRequest,
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) -> Result<()> {
         let resp = self
             .http
             .post(url)
             .headers(self.headers.clone())
             .header(ACCEPT, "text/event-stream")
-            .json(&run_req)
+            .json(run_req)
             .send()
             .await?;
 
@@ -317,6 +362,17 @@ fn handle_sse(
     let Some(chunk) = chunk else {
         return;
     };
+
+    // Handle tool result messages
+    if is_tool_chunk(&chunk) {
+        let tool_name = chunk.name.clone().unwrap_or_else(|| "tool".to_string());
+        let content = message_chunk_content(&chunk);
+        if !content.is_empty() {
+            let _ = tx.send(StreamEvent::ToolResult(tool_name, content));
+        }
+        return;
+    }
+
     if !is_ai_chunk(&chunk) {
         return;
     }
@@ -325,13 +381,19 @@ fn handle_sse(
     if let Some(id) = &chunk.id {
         if current_msg_id.as_ref() != Some(id) {
             if current_msg_id.is_some() {
-                // A previous message existed — signal new message boundary
                 let _ = tx.send(StreamEvent::NewMessage(id.clone()));
             }
             *current_msg_id = Some(id.clone());
         }
     }
 
+    // Check for tool calls in AI chunk
+    let tool_calls = extract_tool_calls(&chunk);
+    for tc in &tool_calls {
+        let _ = tx.send(StreamEvent::ToolUse(tc.name.clone(), tc.args.clone()));
+    }
+
+    // Also emit text content if present
     let content = message_chunk_content(&chunk);
     if !content.is_empty() {
         let _ = tx.send(StreamEvent::Token(content));

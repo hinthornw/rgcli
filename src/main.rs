@@ -309,12 +309,34 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
     let ctx_cfg = config::load_context_config().unwrap_or_default();
     let context_names: Vec<String> = ctx_cfg.contexts.keys().cloned().collect();
 
+    // Fetch available assistants
+    let available_assistants: Vec<(String, String)> = match client.list_assistants().await {
+        Ok(assistants) => assistants
+            .iter()
+            .filter_map(|a| {
+                let id = a.get("assistant_id")?.as_str()?.to_string();
+                let name = a
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| a.get("graph_id").and_then(|v| v.as_str()))
+                    .unwrap_or("unnamed")
+                    .to_string();
+                Some((id, name))
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
     let mut chat_config = ui::ChatConfig {
         version: version_string(),
         endpoint: cfg.endpoint.clone(),
         config_path,
         context_info,
         context_names,
+        assistant_id: cfg.assistant_id.clone(),
+        available_assistants,
+        tenant_id: None,
+        project_id: None,
     };
 
     loop {

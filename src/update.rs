@@ -143,8 +143,16 @@ fn needs_check(state: &UpdateState) -> bool {
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
-    let strip = |v: &str| v.strip_prefix('v').unwrap_or(v).to_string();
-    strip(latest) != strip(current)
+    let parse = |v: &str| -> (u32, u32, u32) {
+        let v = v.strip_prefix('v').unwrap_or(v);
+        let parts: Vec<u32> = v.split('.').filter_map(|p| p.parse().ok()).collect();
+        (
+            parts.first().copied().unwrap_or(0),
+            parts.get(1).copied().unwrap_or(0),
+            parts.get(2).copied().unwrap_or(0),
+        )
+    };
+    parse(latest) > parse(current)
 }
 
 /// Run in background on startup. Silently checks for updates and pre-downloads.

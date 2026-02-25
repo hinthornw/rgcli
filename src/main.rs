@@ -1,11 +1,12 @@
 mod api;
 mod config;
 mod ui;
+mod update;
 
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use inquire::{Confirm, Password, Select, Text};
 
 use crate::api::Client;
@@ -22,10 +23,18 @@ struct Cli {
     /// Show version
     #[arg(long)]
     version: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-const DEFAULT_ENDPOINT: &str =
-    "https://chat-langchain-993a2fee078256ab879993a971197820.us.langgraph.app";
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Upgrade to the latest version
+    Upgrade,
+}
+
+const DEFAULT_ENDPOINT: &str = "";
 const DEFAULT_ASSISTANT: &str = "docs_agent";
 
 #[derive(Clone, Copy)]
@@ -70,6 +79,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(Command::Upgrade) = cli.command {
+        if let Err(err) = update::run_upgrade().await {
+            eprintln!("{}", print_error(&err.to_string()));
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
     if let Err(err) = run(cli.resume).await {
         eprintln!("{}", print_error(&err.to_string()));
         std::process::exit(1);
@@ -87,8 +104,17 @@ async fn run(resume: bool) -> Result<()> {
 
     let mut cfg = config::load().context("failed to load config")?;
 
+    // Background update check (fire and forget)
+    tokio::spawn(async {
+        let _ = update::background_check().await;
+    });
+
     let config_path = config::config_path().unwrap_or_else(|_| "~/.ailsd/config.yaml".into());
     print_logo(&version_string(), &cfg.endpoint, &config_path);
+
+    if let Some(notice) = update::pending_update_notice() {
+        println!("  {}", ui::system_text(&notice));
+    }
     println!();
 
     let mut client = Client::new(&cfg)?;
@@ -132,10 +158,13 @@ async fn run_configure() -> Result<()> {
         }
     }
 
-    endpoint = Text::new("Endpoint URL")
-        .with_help_message("Press Enter to accept default")
-        .with_default(&endpoint)
-        .prompt()?;
+    let mut endpoint_prompt = Text::new("Endpoint URL")
+        .with_placeholder("https://your-deployment.langgraph.app")
+        .with_help_message("Your LangGraph deployment URL");
+    if !endpoint.is_empty() {
+        endpoint_prompt = endpoint_prompt.with_default(&endpoint);
+    }
+    endpoint = endpoint_prompt.prompt()?;
 
     if endpoint.trim().is_empty() {
         anyhow::bail!("endpoint URL is required");

@@ -49,9 +49,7 @@ pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
                     return Ok(None);
                 }
                 KeyCode::Up => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                    }
+                    cursor = cursor.saturating_sub(1);
                 }
                 KeyCode::Down => {
                     if cursor + 1 < threads.len() {
@@ -64,9 +62,7 @@ pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
                     }
                 }
                 KeyCode::BackTab => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                    }
+                    cursor = cursor.saturating_sub(1);
                 }
                 KeyCode::Enter => return Ok(Some(threads[cursor].clone())),
                 _ => {}

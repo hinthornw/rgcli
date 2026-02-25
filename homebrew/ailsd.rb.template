@@ -1,28 +1,28 @@
 # This is a template showing what GoReleaser will generate.
-# The actual formula is auto-pushed to wfh/homebrew-tap on release.
+# The actual formula is auto-pushed to hinthornw/homebrew-tap on release.
 
 class Ailsd < Formula
   desc "CLI for chatting with LangSmith deployments"
-  homepage "https://github.com/wfh/ailsd"
+  homepage "https://github.com/hinthornw/ailsd"
   version "0.1.0"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/wfh/ailsd/releases/download/v#{version}/ailsd_#{version}_darwin_arm64.tar.gz"
+      url "https://github.com/hinthornw/ailsd/releases/download/v#{version}/ailsd_#{version}_darwin_arm64.tar.gz"
       sha256 "PLACEHOLDER"
     else
-      url "https://github.com/wfh/ailsd/releases/download/v#{version}/ailsd_#{version}_darwin_amd64.tar.gz"
+      url "https://github.com/hinthornw/ailsd/releases/download/v#{version}/ailsd_#{version}_darwin_amd64.tar.gz"
       sha256 "PLACEHOLDER"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/wfh/ailsd/releases/download/v#{version}/ailsd_#{version}_linux_arm64.tar.gz"
+      url "https://github.com/hinthornw/ailsd/releases/download/v#{version}/ailsd_#{version}_linux_arm64.tar.gz"
       sha256 "PLACEHOLDER"
     else
-      url "https://github.com/wfh/ailsd/releases/download/v#{version}/ailsd_#{version}_linux_amd64.tar.gz"
+      url "https://github.com/hinthornw/ailsd/releases/download/v#{version}/ailsd_#{version}_linux_amd64.tar.gz"
       sha256 "PLACEHOLDER"
     end
   end

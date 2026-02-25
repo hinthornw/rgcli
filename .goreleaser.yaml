@@ -1,0 +1,62 @@
+version: 2
+
+project_name: ailsd
+
+before:
+  hooks:
+    - cargo fetch
+
+builds:
+  - id: ailsd
+    builder: rust
+    tool: cargo
+    command: build
+    binary: ailsd
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    flags:
+      - --release
+    env:
+      - AILSD_VERSION={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+
+release:
+  github:
+    owner: hinthornw
+    name: ailsd
+
+brews:
+  - name: ailsd
+    repository:
+      owner: hinthornw
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/hinthornw/ailsd"
+    description: "CLI for chatting with LangSmith deployments"
+    license: "MIT"
+    install: |
+      bin.install "ailsd"
+    test: |
+      system "#{bin}/ailsd", "--help"

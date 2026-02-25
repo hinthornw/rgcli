@@ -1,6 +1,6 @@
 [package]
 name = "ailsd"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
@@ -8,12 +8,14 @@ anyhow = "1.0.82"
 bytes = "1.11.0"
 clap = { version = "4.5.30", features = ["derive"] }
 crossterm = "0.28.1"
+flate2 = "1.0"
 directories = "5.0.1"
 futures-util = "0.3.30"
 inquire = "0.7.5"
 ratatui = "0.29.0"
 reqwest = { version = "0.12.5", features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1.0.197", features = ["derive"] }
+tar = "0.4"
 serde_json = "1.0.114"
 serde_yaml = "0.9.34"
 chrono = { version = "0.4", features = ["serde"] }

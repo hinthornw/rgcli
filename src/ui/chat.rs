@@ -121,25 +121,23 @@ fn prompt_message() -> Result<InputOutcome> {
                     ctrl_c_at = None;
                 }
 
-                if show_complete && !completions.is_empty() {
-                    if handle_completion_keys(
-                        &key,
-                        &mut textarea,
-                        &mut show_complete,
-                        &mut completion_idx,
+                if show_complete && !completions.is_empty() && handle_completion_keys(
+                    &key,
+                    &mut textarea,
+                    &mut show_complete,
+                    &mut completion_idx,
+                    &completions,
+                )? {
+                    update_completions(&textarea, &mut completions, &mut show_complete);
+                    render_input(
+                        origin,
+                        &textarea,
+                        ctrl_c_at.is_some(),
                         &completions,
-                    )? {
-                        update_completions(&textarea, &mut completions, &mut show_complete);
-                        render_input(
-                            origin,
-                            &textarea,
-                            ctrl_c_at.is_some(),
-                            &completions,
-                            completion_idx,
-                            show_complete,
-                        )?;
-                        continue;
-                    }
+                        completion_idx,
+                        show_complete,
+                    )?;
+                    continue;
                 }
 
                 match key.code {
@@ -319,10 +317,8 @@ fn render_input(
         raw_cursor_position(&line_map, textarea.cursor(), max_width);
     let total_lines = display_lines.len();
     let mut start = 0usize;
-    if total_lines > MAX_INPUT_LINES {
-        if cursor_display_row + 1 > MAX_INPUT_LINES {
-            start = cursor_display_row + 1 - MAX_INPUT_LINES;
-        }
+    if total_lines > MAX_INPUT_LINES && cursor_display_row + 1 > MAX_INPUT_LINES {
+        start = cursor_display_row + 1 - MAX_INPUT_LINES;
     }
     let visible_lines = total_lines.min(MAX_INPUT_LINES);
     let indent = " ".repeat(prompt_len);

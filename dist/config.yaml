@@ -130,7 +130,7 @@ gitlab_urls:
 brews:
   - name: ailsd
     repository:
-      owner: wfh
+      owner: hinthornw
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
     commit_author:
@@ -143,7 +143,7 @@ brews:
     test: |
       system "#{bin}/ailsd", "--help"
     description: CLI for chatting with LangSmith deployments
-    homepage: https://github.com/wfh/ailsd
+    homepage: https://github.com/hinthornw/ailsd
     license: MIT
     goarm: "6"
     goamd64: v1

@@ -7,7 +7,7 @@
 Create a GitHub repository called `homebrew-tap`:
 
 ```bash
-# On GitHub, create: wfh/homebrew-tap
+# On GitHub, create: hinthornw/homebrew-tap
 # Or via gh CLI:
 gh repo create homebrew-tap --public --description "Homebrew formulas"
 ```
@@ -15,10 +15,10 @@ gh repo create homebrew-tap --public --description "Homebrew formulas"
 Initialize it with a Formula directory:
 
 ```bash
-git clone https://github.com/wfh/homebrew-tap.git
+git clone https://github.com/hinthornw/homebrew-tap.git
 cd homebrew-tap
 mkdir Formula
-echo "# Homebrew Tap\n\nInstall formulas:\n\n\`\`\`bash\nbrew tap wfh/tap\nbrew install ailsd\n\`\`\`" > README.md
+echo "# Homebrew Tap\n\nInstall formulas:\n\n\`\`\`bash\nbrew tap hinthornw/tap\nbrew install ailsd\n\`\`\`" > README.md
 git add .
 git commit -m "Initial commit"
 git push
@@ -57,14 +57,14 @@ git push origin main --tags
 The GitHub Action will:
 1. Build binaries for darwin/linux (amd64/arm64)
 2. Create a GitHub Release with the binaries
-3. Push the Homebrew formula to wfh/homebrew-tap
+3. Push the Homebrew formula to hinthornw/homebrew-tap
 
-Check progress at: https://github.com/wfh/ailsd/actions
+Check progress at: https://github.com/hinthornw/ailsd/actions
 
 ### 3. Verify Installation
 
 ```bash
-brew tap wfh/tap
+brew tap hinthornw/tap
 brew install ailsd
 ailsd --help
 ```

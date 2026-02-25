@@ -15,7 +15,7 @@ where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
     F: FnMut(SseEvent),
 {
-    let stream = stream.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
+    let stream = stream.map_err(std::io::Error::other);
     let reader = StreamReader::new(stream);
     let mut lines = FramedRead::new(reader, LinesCodec::new());
 
@@ -37,11 +37,7 @@ where
         if let Some(rest) = line.strip_prefix("event:") {
             current.event = rest.trim().to_string();
         } else if let Some(rest) = line.strip_prefix("data:") {
-            let data = if rest.starts_with(' ') {
-                &rest[1..]
-            } else {
-                rest
-            };
+            let data = rest.strip_prefix(' ').unwrap_or(rest);
             data_lines.push(data.to_string());
         } else if let Some(rest) = line.strip_prefix("id:") {
             current.id = rest.trim().to_string();

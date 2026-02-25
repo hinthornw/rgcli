@@ -4,7 +4,7 @@ A CLI for chatting with LangSmith deployments.
 
 ```
    ▄█▀▀█▄
-  ▄██▄░▄█    ailsd v0.1.0
+  ▄██▄░▄█    ailsd v0.0.1
   ███████    https://your-deployment.langgraph.app
   ▀█░░░█     ~/.ailsd/config.yaml
    █▀ █▀
@@ -15,26 +15,26 @@ A CLI for chatting with LangSmith deployments.
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wfh/ailsd/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hinthornw/ailsd/main/install.sh | sh
 ```
 
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap wfh/tap
+brew tap hinthornw/tap
 brew install ailsd
 ```
 
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/wfh/ailsd.git
+cargo install --git https://github.com/hinthornw/ailsd.git
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/wfh/ailsd.git
+git clone https://github.com/hinthornw/ailsd.git
 cd ailsd
 make build
 ./target/release/ailsd

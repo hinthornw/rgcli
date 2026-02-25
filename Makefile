@@ -23,7 +23,6 @@ format:
 ## clean: Clean build artifacts and config
 clean:
 	rm -rf target
-	rm -f ~/.ailsd/config.yaml
 
 ## install: Install binary to ~/.cargo/bin
 install:

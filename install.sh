@@ -1,9 +1,9 @@
 #!/bin/sh
 # ailsd installer script
-# Usage: curl -fsSL https://raw.githubusercontent.com/wfh/ailsd/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/hinthornw/ailsd/main/install.sh | sh
 set -e
 
-REPO="wfh/ailsd"
+REPO="hinthornw/ailsd"
 BINARY="ailsd"
 INSTALL_DIR="${AILSD_INSTALL_DIR:-/usr/local/bin}"
 

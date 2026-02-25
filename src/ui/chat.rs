@@ -13,6 +13,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{ThemeSet, Style as SyntectStyle};
+use syntect::parsing::SyntaxSet;
 use tokio::sync::mpsc;
 use tokio::time;
 use tui_textarea::{CursorMove, Input, Key, TextArea};
@@ -140,6 +143,11 @@ struct App {
 
     // Stream mode
     stream_mode: String,
+
+    // Search mode
+    search_mode: bool,
+    search_query: String,
+    search_matches: Vec<usize>,
 }
 
 #[derive(Default, Clone)]
@@ -192,6 +200,9 @@ impl App {
             devtools: false,
             metrics: RunMetrics::default(),
             stream_mode: "messages-tuple".to_string(),
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
         }
     }
 
@@ -461,12 +472,14 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     let input_height = (app.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
     let area = frame.area();
 
+    let status_height = if app.search_mode { 2 } else { 1 };
+
     if app.devtools {
         let chunks = Layout::vertical([
             Constraint::Min(3),
             Constraint::Length(input_height),
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(status_height),
         ])
         .split(area);
 
@@ -478,7 +491,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let chunks = Layout::vertical([
             Constraint::Min(3),
             Constraint::Length(input_height),
-            Constraint::Length(1),
+            Constraint::Length(status_height),
         ])
         .split(area);
 
@@ -491,10 +504,53 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut in_code_block = false;
+    let mut code_language: Option<String> = None;
+    let mut code_lines: Vec<String> = Vec::new();
+
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let theme = &ts.themes["base16-ocean.dark"];
 
     for raw_line in text.lines() {
         if raw_line.starts_with("```") {
-            in_code_block = !in_code_block;
+            if in_code_block {
+                // End of code block - render accumulated code with syntax highlighting
+                if let Some(lang) = &code_language {
+                    let syntax = ps.find_syntax_by_token(lang)
+                        .unwrap_or_else(|| ps.find_syntax_plain_text());
+                    let mut highlighter = HighlightLines::new(syntax, theme);
+
+                    for code_line in &code_lines {
+                        let highlighted = highlighter.highlight_line(code_line, &ps)
+                            .unwrap_or_default();
+                        let spans: Vec<Span<'static>> = highlighted
+                            .into_iter()
+                            .map(|(style, text)| {
+                                Span::styled(
+                                    format!("  {}", text),
+                                    syntect_to_ratatui_style(style),
+                                )
+                            })
+                            .collect();
+                        lines.push(Line::from(spans));
+                    }
+                } else {
+                    // No language specified, use plain green
+                    for code_line in &code_lines {
+                        lines.push(Line::from(Span::styled(
+                            format!("  {code_line}"),
+                            Style::new().fg(Color::Green),
+                        )));
+                    }
+                }
+                code_lines.clear();
+                code_language = None;
+                in_code_block = false;
+            } else {
+                // Start of code block
+                in_code_block = true;
+                code_language = raw_line.strip_prefix("```").map(|s| s.trim().to_string());
+            }
             lines.push(Line::from(Span::styled(
                 raw_line.to_string(),
                 Style::new().fg(Color::DarkGray),
@@ -503,10 +559,7 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
         }
 
         if in_code_block {
-            lines.push(Line::from(Span::styled(
-                format!("  {raw_line}"),
-                Style::new().fg(Color::Green),
-            )));
+            code_lines.push(raw_line.to_string());
             continue;
         }
 
@@ -536,7 +589,44 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
             lines.push(Line::from(spans));
         }
     }
+
+    // Handle unclosed code block at end of text
+    if in_code_block && !code_lines.is_empty() {
+        if let Some(lang) = &code_language {
+            let syntax = ps.find_syntax_by_token(lang)
+                .unwrap_or_else(|| ps.find_syntax_plain_text());
+            let mut highlighter = HighlightLines::new(syntax, theme);
+
+            for code_line in &code_lines {
+                let highlighted = highlighter.highlight_line(code_line, &ps)
+                    .unwrap_or_default();
+                let spans: Vec<Span<'static>> = highlighted
+                    .into_iter()
+                    .map(|(style, text)| {
+                        Span::styled(
+                            format!("  {}", text),
+                            syntect_to_ratatui_style(style),
+                        )
+                    })
+                    .collect();
+                lines.push(Line::from(spans));
+            }
+        } else {
+            for code_line in &code_lines {
+                lines.push(Line::from(Span::styled(
+                    format!("  {code_line}"),
+                    Style::new().fg(Color::Green),
+                )));
+            }
+        }
+    }
+
     lines
+}
+
+fn syntect_to_ratatui_style(style: SyntectStyle) -> Style {
+    let fg = style.foreground;
+    Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b))
 }
 
 fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
@@ -592,15 +682,23 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
 
     lines.extend(app.welcome_lines.clone());
 
-    for msg in &app.messages {
+    for (idx, msg) in app.messages.iter().enumerate() {
+        let is_match = app.search_mode && app.search_matches.contains(&idx);
+        let highlight_style = if is_match {
+            Style::new().bg(Color::Rgb(60, 60, 0))
+        } else {
+            Style::default()
+        };
+
         match msg {
             ChatMessage::User(text) => {
                 lines.push(Line::default());
                 for line in text.lines() {
-                    lines.push(Line::from(vec![
+                    let spans = vec![
                         Span::styled("You: ", styles::user_style()),
-                        Span::raw(line),
-                    ]));
+                        Span::styled(line, highlight_style),
+                    ];
+                    lines.push(Line::from(spans));
                 }
             }
             ChatMessage::Assistant(text) => {
@@ -611,9 +709,21 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     if first {
                         let mut spans =
                             vec![Span::styled("Assistant: ", styles::assistant_style())];
-                        spans.extend(line.spans);
+                        if is_match {
+                            let highlighted_spans: Vec<Span> = line.spans.into_iter()
+                                .map(|s| Span::styled(s.content, s.style.patch(highlight_style)))
+                                .collect();
+                            spans.extend(highlighted_spans);
+                        } else {
+                            spans.extend(line.spans);
+                        }
                         lines.push(Line::from(spans));
                         first = false;
+                    } else if is_match {
+                        let highlighted_spans: Vec<Span> = line.spans.into_iter()
+                            .map(|s| Span::styled(s.content, s.style.patch(highlight_style)))
+                            .collect();
+                        lines.push(Line::from(highlighted_spans));
                     } else {
                         lines.push(line);
                     }
@@ -626,9 +736,9 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     args.clone()
                 };
                 lines.push(Line::from(vec![
-                    Span::styled("  🔧 ", Style::new().fg(Color::Yellow)),
-                    Span::styled(name.as_str(), Style::new().add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("({args_short})"), Style::new().fg(Color::DarkGray)),
+                    Span::styled("  🔧 ", Style::new().fg(Color::Yellow).patch(highlight_style)),
+                    Span::styled(name.as_str(), Style::new().add_modifier(Modifier::BOLD).patch(highlight_style)),
+                    Span::styled(format!("({args_short})"), Style::new().fg(Color::DarkGray).patch(highlight_style)),
                 ]));
             }
             ChatMessage::ToolResult(name, content) => {
@@ -640,26 +750,27 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 // Show first line only, indented
                 let first_line = truncated.lines().next().unwrap_or("").to_string();
                 lines.push(Line::from(vec![
-                    Span::styled("  ← ", Style::new().fg(Color::DarkGray)),
+                    Span::styled("  ← ", Style::new().fg(Color::DarkGray).patch(highlight_style)),
                     Span::styled(
                         format!("{name}: "),
                         Style::new()
                             .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
+                            .add_modifier(Modifier::ITALIC)
+                            .patch(highlight_style),
                     ),
-                    Span::styled(first_line, Style::new().fg(Color::DarkGray)),
+                    Span::styled(first_line, Style::new().fg(Color::DarkGray).patch(highlight_style)),
                 ]));
             }
             ChatMessage::System(text) => {
                 lines.push(Line::from(Span::styled(
                     text.as_str(),
-                    styles::system_style_r(),
+                    styles::system_style_r().patch(highlight_style),
                 )));
             }
             ChatMessage::Error(text) => {
                 lines.push(Line::from(Span::styled(
                     text.as_str(),
-                    styles::error_style_r(),
+                    styles::error_style_r().patch(highlight_style),
                 )));
             }
         }
@@ -828,6 +939,31 @@ fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    if app.search_mode {
+        // Split area into search bar and status bar
+        let chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+        // Render search bar
+        let search_text = format!(" Search: {} ({} matches)", app.search_query, app.search_matches.len());
+        let search_line = Line::from(Span::styled(
+            search_text,
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ));
+        let search_bar = Paragraph::new(search_line).style(styles::status_bar_style());
+        frame.render_widget(search_bar, chunks[0]);
+
+        // Render normal status bar
+        render_status_bar(frame, app, chunks[1]);
+    } else {
+        render_status_bar(frame, app, area);
+    }
+}
+
+fn render_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
 
     // Show current assistant
@@ -1163,6 +1299,29 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
         }
     }
 
+    // Handle search mode
+    if app.search_mode {
+        match key.code {
+            KeyCode::Esc => {
+                app.search_mode = false;
+                app.search_query.clear();
+                app.search_matches.clear();
+                return Action::None;
+            }
+            KeyCode::Backspace => {
+                app.search_query.pop();
+                update_search_matches(app);
+                return Action::None;
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.search_query.push(c);
+                update_search_matches(app);
+                return Action::None;
+            }
+            _ => return Action::None,
+        }
+    }
+
     if app.show_complete && !app.completions.is_empty() {
         if let Some(action) = handle_completion_key(&key, app) {
             return action;
@@ -1178,6 +1337,15 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             return Action::Quit;
+        }
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_mode = !app.search_mode;
+            if !app.search_mode {
+                app.search_query.clear();
+                app.search_matches.clear();
+            } else {
+                update_search_matches(app);
+            }
         }
         KeyCode::Esc => {
             if app.last_esc_at.is_some() && app.is_streaming() {
@@ -1346,6 +1514,38 @@ fn collect_input(textarea: &TextArea) -> String {
         .join("\n")
         .trim()
         .to_string()
+}
+
+fn update_search_matches(app: &mut App) {
+    app.search_matches.clear();
+    if app.search_query.is_empty() {
+        return;
+    }
+
+    let query_lower = app.search_query.to_lowercase();
+    for (idx, msg) in app.messages.iter().enumerate() {
+        let text = match msg {
+            ChatMessage::User(text) | ChatMessage::Assistant(text) | ChatMessage::System(text) | ChatMessage::Error(text) => text,
+            ChatMessage::ToolUse(name, args) => {
+                let combined = format!("{} {}", name, args);
+                if combined.to_lowercase().contains(&query_lower) {
+                    app.search_matches.push(idx);
+                }
+                continue;
+            }
+            ChatMessage::ToolResult(name, content) => {
+                let combined = format!("{} {}", name, content);
+                if combined.to_lowercase().contains(&query_lower) {
+                    app.search_matches.push(idx);
+                }
+                continue;
+            }
+        };
+
+        if text.to_lowercase().contains(&query_lower) {
+            app.search_matches.push(idx);
+        }
+    }
 }
 
 fn update_completions(app: &mut App) {
@@ -1664,6 +1864,9 @@ fn show_help(app: &mut App) {
     ));
     app.messages
         .push(ChatMessage::System("  Ctrl+C Ctrl+C  Quit".to_string()));
+    app.messages.push(ChatMessage::System(
+        "  Ctrl+R         Toggle search mode".to_string(),
+    ));
     app.messages.push(ChatMessage::System(
         "  PageUp/Down    Scroll chat history".to_string(),
     ));

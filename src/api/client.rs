@@ -53,6 +53,65 @@ impl Client {
         })
     }
 
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Generic GET returning JSON.
+    pub async fn get_json(&self, url: &str) -> Result<serde_json::Value> {
+        let resp = self.http.get(url).headers(self.headers.clone()).send().await?;
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GET {} failed: {} - {}", url, status, body);
+        }
+        Ok(resp.json().await?)
+    }
+
+    /// Generic POST returning JSON.
+    pub async fn post_json(&self, url: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let resp = self.http.post(url).headers(self.headers.clone()).json(body).send().await?;
+        if resp.status() != StatusCode::OK && resp.status() != StatusCode::CREATED {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("POST {} failed: {} - {}", url, status, body);
+        }
+        Ok(resp.json().await?)
+    }
+
+    /// Generic PUT.
+    pub async fn put_json(&self, url: &str, body: &serde_json::Value) -> Result<()> {
+        let resp = self.http.put(url).headers(self.headers.clone()).json(body).send().await?;
+        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("PUT {} failed: {} - {}", url, status, body);
+        }
+        Ok(())
+    }
+
+    /// Generic DELETE by URL.
+    pub async fn delete_url(&self, url: &str) -> Result<()> {
+        let resp = self.http.delete(url).headers(self.headers.clone()).send().await?;
+        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT && resp.status() != StatusCode::ACCEPTED {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("DELETE {} failed: {} - {}", url, status, body);
+        }
+        Ok(())
+    }
+
+    /// DELETE with JSON body.
+    pub async fn delete_json(&self, url: &str, body: &serde_json::Value) -> Result<()> {
+        let resp = self.http.delete(url).headers(self.headers.clone()).json(body).send().await?;
+        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("DELETE {} failed: {} - {}", url, status, body);
+        }
+        Ok(())
+    }
+
     pub async fn create_thread(&self) -> Result<Thread> {
         let url = format!("{}/threads", self.endpoint);
         let resp = self

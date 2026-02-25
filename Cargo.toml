@@ -1,6 +1,6 @@
 [package]
 name = "ailsd"
-version = "0.0.5"
+version = "0.1.0"
 edition = "2024"
 
 [dependencies]
@@ -26,3 +26,4 @@ tui-textarea = "0.7.0"
 urlencoding = "2.1"
 # tui-markdown removed due to ratatui version mismatch
 base64 = "0.22.1"
+comfy-table = "=7.1.3"

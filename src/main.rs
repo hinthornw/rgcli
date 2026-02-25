@@ -1,4 +1,5 @@
 mod api;
+mod commands;
 mod config;
 mod context;
 mod langsmith;
@@ -94,6 +95,125 @@ enum Command {
         #[command(subcommand)]
         action: ContextAction,
     },
+    /// Manage assistants
+    Assistants {
+        #[command(subcommand)]
+        action: AssistantAction,
+    },
+    /// Manage threads
+    Threads {
+        #[command(subcommand)]
+        action: ThreadAction,
+    },
+    /// Manage runs
+    Runs {
+        #[command(subcommand)]
+        action: RunAction,
+    },
+    /// Persistent key-value store operations
+    Store {
+        #[command(subcommand)]
+        action: StoreAction,
+    },
+    /// Manage cron jobs
+    Crons {
+        #[command(subcommand)]
+        action: CronAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AssistantAction {
+    /// List all assistants
+    List,
+    /// Get assistant details
+    Get { id: String },
+    /// Show assistant graph structure
+    Graph { id: String },
+    /// Show state and config schemas
+    Schemas { id: String },
+    /// List assistant versions
+    Versions { id: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum ThreadAction {
+    /// List threads
+    List {
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    /// Get thread details
+    Get { id: String },
+    /// Create a new thread
+    Create,
+    /// Delete a thread
+    Delete { id: String },
+    /// Show thread state
+    State { id: String },
+    /// Show thread checkpoint history
+    History {
+        id: String,
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum RunAction {
+    /// List runs for a thread
+    List {
+        thread_id: String,
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    /// Get run details
+    Get { thread_id: String, run_id: String },
+    /// Cancel a running run
+    Cancel { thread_id: String, run_id: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum StoreAction {
+    /// Get an item from the store
+    Get { namespace: String, key: String },
+    /// Put an item in the store
+    Put {
+        namespace: String,
+        key: String,
+        #[arg(long)]
+        value: String,
+    },
+    /// Delete an item from the store
+    Delete { namespace: String, key: String },
+    /// Search items in a namespace
+    Search {
+        namespace: String,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+    /// List namespaces
+    Namespaces,
+}
+
+#[derive(Subcommand, Debug)]
+enum CronAction {
+    /// List cron jobs
+    List {
+        #[arg(long)]
+        assistant: Option<String>,
+    },
+    /// Create a cron job
+    Create {
+        #[arg(long)]
+        assistant: String,
+        #[arg(long)]
+        schedule: String,
+    },
+    /// Delete a cron job
+    Delete { id: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -198,6 +318,58 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
+        Some(Command::Assistants { action }) => {
+            return run_sdk_command(|client| async move {
+                match action {
+                    AssistantAction::List => commands::assistants::list(&client).await,
+                    AssistantAction::Get { id } => commands::assistants::get(&client, &id).await,
+                    AssistantAction::Graph { id } => commands::assistants::graph(&client, &id).await,
+                    AssistantAction::Schemas { id } => commands::assistants::schemas(&client, &id).await,
+                    AssistantAction::Versions { id } => commands::assistants::versions(&client, &id).await,
+                }
+            }).await;
+        }
+        Some(Command::Threads { action }) => {
+            return run_sdk_command(|client| async move {
+                match action {
+                    ThreadAction::List { limit } => commands::threads::list(&client, limit).await,
+                    ThreadAction::Get { id } => commands::threads::get(&client, &id).await,
+                    ThreadAction::Create => commands::threads::create(&client).await,
+                    ThreadAction::Delete { id } => commands::threads::delete(&client, &id).await,
+                    ThreadAction::State { id } => commands::threads::state(&client, &id).await,
+                    ThreadAction::History { id, limit } => commands::threads::history(&client, &id, limit).await,
+                }
+            }).await;
+        }
+        Some(Command::Runs { action }) => {
+            return run_sdk_command(|client| async move {
+                match action {
+                    RunAction::List { thread_id, limit } => commands::runs::list(&client, &thread_id, limit).await,
+                    RunAction::Get { thread_id, run_id } => commands::runs::get(&client, &thread_id, &run_id).await,
+                    RunAction::Cancel { thread_id, run_id } => commands::runs::cancel(&client, &thread_id, &run_id).await,
+                }
+            }).await;
+        }
+        Some(Command::Store { action }) => {
+            return run_sdk_command(|client| async move {
+                match action {
+                    StoreAction::Get { namespace, key } => commands::store::get_item(&client, &namespace, &key).await,
+                    StoreAction::Put { namespace, key, value } => commands::store::put_item(&client, &namespace, &key, &value).await,
+                    StoreAction::Delete { namespace, key } => commands::store::delete_item(&client, &namespace, &key).await,
+                    StoreAction::Search { namespace, query, limit } => commands::store::search(&client, &namespace, query.as_deref(), limit).await,
+                    StoreAction::Namespaces => commands::store::namespaces(&client).await,
+                }
+            }).await;
+        }
+        Some(Command::Crons { action }) => {
+            return run_sdk_command(|client| async move {
+                match action {
+                    CronAction::List { assistant } => commands::crons::list(&client, assistant.as_deref()).await,
+                    CronAction::Create { assistant, schedule } => commands::crons::create(&client, &assistant, &schedule).await,
+                    CronAction::Delete { id } => commands::crons::delete(&client, &id).await,
+                }
+            }).await;
+        }
         None => {}
     }
 
@@ -216,6 +388,21 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    Ok(())
+}
+
+/// Helper to load config, create client, and run a subcommand.
+async fn run_sdk_command<F, Fut>(f: F) -> Result<()>
+where
+    F: FnOnce(Client) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let cfg = config::load().context("failed to load config (run `ailsd` interactively first)")?;
+    let client = Client::new(&cfg)?;
+    if let Err(err) = f(client).await {
+        eprintln!("{}", print_error(&err.to_string()));
+        std::process::exit(1);
+    }
     Ok(())
 }
 

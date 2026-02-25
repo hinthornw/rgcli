@@ -47,6 +47,8 @@ const TIPS: &[&str] = &[
     "Use ailsd doctor to diagnose connectivity issues",
     "Double-tap Esc to cancel a streaming response",
     "Use /export to save the conversation as markdown",
+    "Press Ctrl+B to navigate between screens (threads, runs, store...)",
+    "Use /threads, /runs, /store, /logs to jump to any screen",
 ];
 
 #[derive(Debug)]
@@ -55,6 +57,8 @@ pub enum ChatExit {
     SwitchContext(String),
     NewThread,
     Quit,
+    RunDoctor,
+    RunBench,
 }
 
 pub(crate) enum Action {
@@ -74,6 +78,7 @@ pub(crate) enum Action {
     Export,
     Mode(String),
     NavigateScreen(super::screen::Screen),
+    ExitFor(ChatExit),
 }
 
 #[derive(Clone)]
@@ -332,6 +337,7 @@ impl ChatState {
                 ScreenAction::None
             }
             Action::NavigateScreen(screen) => ScreenAction::Navigate(screen),
+            Action::ExitFor(exit) => ScreenAction::ChatExit(exit),
             Action::None => ScreenAction::None,
         }
     }
@@ -1482,6 +1488,12 @@ fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action {
             if value == "/logs" {
                 return Action::NavigateScreen(super::screen::Screen::Logs);
             }
+            if value == "/doctor" {
+                return Action::ExitFor(ChatExit::RunDoctor);
+            }
+            if value == "/bench" || value.starts_with("/bench ") {
+                return Action::ExitFor(ChatExit::RunBench);
+            }
             if value == "/clear" {
                 return Action::Clear;
             }
@@ -1910,6 +1922,14 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/logs",
         desc: "Browse recent logs",
+    },
+    SlashCommand {
+        name: "/bench",
+        desc: "Run load test",
+    },
+    SlashCommand {
+        name: "/doctor",
+        desc: "Diagnose connectivity",
     },
     SlashCommand {
         name: "/mode",

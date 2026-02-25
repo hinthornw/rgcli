@@ -2,7 +2,7 @@ use std::io::stdout;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode};
+use crossterm::event::{Event, EventStream, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use futures_util::StreamExt;
@@ -149,6 +149,12 @@ impl TuiApp {
             return None;
         }
 
+        // Ctrl+B opens command bar from ANY screen (including chat)
+        if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.command_bar.open();
+            return None;
+        }
+
         // `:` opens command bar from non-chat screens
         if self.screen != Screen::Chat && key.code == KeyCode::Char(':') {
             self.command_bar.open();
@@ -290,6 +296,18 @@ impl TuiApp {
                 spans.push(Span::styled(label, Style::default().fg(Color::DarkGray)));
             }
             spans.push(Span::raw("  "));
+        }
+        // Right-align a Ctrl+B hint
+        let hint = Span::styled(
+            "^B navigate ",
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+        );
+        let tabs_width: usize = spans.iter().map(|s| s.content.len()).sum();
+        let hint_width = hint.content.len();
+        let padding = area.width as usize - tabs_width.min(area.width as usize) - hint_width;
+        if padding > 0 {
+            spans.push(Span::raw(" ".repeat(padding)));
+            spans.push(hint);
         }
         let line = Line::from(spans);
         let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(25, 25, 25)));

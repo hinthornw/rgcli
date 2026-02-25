@@ -967,6 +967,16 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 thread_id = thread.thread_id;
                 history.clear();
             }
+            ui::ChatExit::RunDoctor => {
+                run_doctor().await?;
+                println!("\nPress Enter to return to chat...");
+                let _ = std::io::stdin().read_line(&mut String::new());
+            }
+            ui::ChatExit::RunBench => {
+                commands::bench::run(&client, &cfg.assistant_id, 5, 20, vec!["hello".to_string()]).await?;
+                println!("\nPress Enter to return to chat...");
+                let _ = std::io::stdin().read_line(&mut String::new());
+            }
             ui::ChatExit::Quit => {
                 println!("To resume this thread:\n  ailsd --thread-id {}", thread_id);
                 return Ok(());

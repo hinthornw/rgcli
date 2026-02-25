@@ -1,25 +1,31 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-// Kawaii parrot palette — soft, rounded feel
-const GREEN: Color = Color::Rgb(100, 210, 120);
-const GREEN_LT: Color = Color::Rgb(150, 230, 160);
-const BELLY: Color = Color::Rgb(255, 250, 220);
-const BEAK: Color = Color::Rgb(255, 180, 80);
-const BLUSH: Color = Color::Rgb(255, 150, 150);
-const EYE_BG: Color = Color::Rgb(40, 40, 60);
+// Kawaii parrot palette
+const GREEN: Color = Color::Rgb(90, 200, 110);
+const GREEN_LT: Color = Color::Rgb(140, 225, 155);
+const GREEN_DK: Color = Color::Rgb(60, 160, 80);
+const BELLY: Color = Color::Rgb(245, 245, 215);
+const BEAK: Color = Color::Rgb(255, 170, 60);
+const BLUSH: Color = Color::Rgb(255, 130, 140);
+const EYE_BG: Color = Color::Rgb(30, 30, 50);
 const EYE_SHINE: Color = Color::Rgb(255, 255, 255);
-const CREST: Color = Color::Rgb(255, 120, 100);
-const WING: Color = Color::Rgb(80, 180, 220);
-const FEET: Color = Color::Rgb(255, 180, 80);
+const CREST: Color = Color::Rgb(255, 100, 90);
+const WING: Color = Color::Rgb(70, 170, 210);
+const FEET: Color = Color::Rgb(255, 170, 60);
 const BG: Color = Color::Reset;
 
-fn s(fg_c: Color, bg_c: Color) -> Style {
-    Style::default().fg(fg_c).bg(bg_c)
+/// ▄ = fg on bottom half, bg on top half
+fn hb(top: Color, bot: Color) -> Style {
+    Style::default().fg(bot).bg(top)
 }
 
 fn fg(c: Color) -> Style {
     Style::default().fg(c)
+}
+
+fn on(fg_c: Color, bg_c: Color) -> Style {
+    Style::default().fg(fg_c).bg(bg_c)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,18 +82,17 @@ impl Parrot {
             ParrotState::Idle => self.render_idle(),
             ParrotState::Typing => self.render_typing(),
             ParrotState::Thinking => self.render_thinking(),
-            ParrotState::Threads => self.render_screen("~"),
-            ParrotState::Assistants => self.render_screen("*"),
+            ParrotState::Threads => kawaii_parrot(Eyes::Normal),
+            ParrotState::Assistants => kawaii_parrot(Eyes::Normal),
             ParrotState::Runs => self.render_runs(),
             ParrotState::Store => self.render_thinking(),
-            ParrotState::Crons => self.render_screen("@"),
-            ParrotState::Logs => self.render_screen("#"),
+            ParrotState::Crons => kawaii_parrot(Eyes::Normal),
+            ParrotState::Logs => kawaii_parrot(Eyes::Normal),
         }
     }
 
     fn render_idle(&self) -> Vec<Line<'static>> {
-        let blink = self.frame % 15 == 0;
-        if blink {
+        if self.frame % 15 == 0 {
             kawaii_parrot(Eyes::Happy)
         } else {
             kawaii_parrot(Eyes::Normal)
@@ -127,122 +132,146 @@ impl Parrot {
     }
 
     fn render_runs(&self) -> Vec<Line<'static>> {
-        // Alternate between normal and happy — bouncy energy
         if self.frame % 2 == 0 {
             kawaii_parrot(Eyes::Sparkle)
         } else {
             kawaii_parrot(Eyes::Happy)
         }
     }
-
-    fn render_screen(&self, _marker: &str) -> Vec<Line<'static>> {
-        kawaii_parrot(Eyes::Normal)
-    }
 }
 
 #[derive(Clone, Copy)]
 enum Eyes {
-    Normal,  // big round eyes with shine
-    Happy,   // ^_^ squint
-    Sparkle, // star eyes
+    Normal,
+    Happy,
+    Sparkle,
     LookLeft,
     LookRight,
 }
 
-/// Kawaii parrot — 8 lines tall, round and soft
-///
-/// Design (conceptual):
-///    ╭──╮        <- crest tuft
-///   ╭(●ω●)╮     <- round head, big eyes, tiny beak
-///   │ >//< │     <- blush cheeks
-///   ╰┬────┬╯     <- round body
-///    ╰┘  ╰┘     <- tiny feet
-///
-/// Using half-blocks and unicode for soft round shapes.
-fn kawaii_parrot(eyes: Eyes) -> Vec<Line<'static>> {
-    // Line 0: little crest tuft
-    let line0 = Line::from(vec![Span::raw("    "), Span::styled("▄▄", s(CREST, BG))]);
+// Sprite layout (each char = 1 cell, each line = 1 terminal row using half-blocks):
+//
+//        ▄█▄             crest tuft (line 0)
+//      ▄█████▄           rounded head top (line 1)
+//     █ ◕   ◕ █          eyes with space (line 2)
+//     █ ◗◖    █          beak — wider, visible (line 3)  [note: ◗◖ don't render, use ▼ or text]
+//     █ ·   · █          blush cheeks (line 3 alt)
+//     ▀▄█████▄▀          wing tips + body transition (line 4) -- nah
+//      ▐█████▌           round belly (line 5)
+//       ▀▀▀▀▀            bottom curve (line 6)
+//        ▪ ▪             tiny feet (line 7)
+//
+// Actual approach: 9-wide head, use ▄▀ for rounding, colored backgrounds
 
-    // Line 1: top of head — round
+fn kawaii_parrot(eyes: Eyes) -> Vec<Line<'static>> {
+    // Line 0: crest — small rounded tuft
+    //    ▄█▄
+    let line0 = Line::from(vec![
+        Span::raw("    "),
+        Span::styled("▄", hb(BG, CREST)),
+        Span::styled("█", on(CREST, CREST)),
+        Span::styled("▄", hb(BG, CREST)),
+    ]);
+
+    // Line 1: top of head — rounded with ▄ half-blocks
+    //   ▄███████▄
     let line1 = Line::from(vec![
         Span::raw("  "),
-        Span::styled("▄", s(GREEN, BG)),
-        Span::styled("▄▄▄▄", s(GREEN_LT, BG)),
-        Span::styled("▄", s(GREEN, BG)),
+        Span::styled("▄", hb(BG, GREEN_LT)),
+        Span::styled("▄", hb(BG, GREEN_LT)),
+        Span::styled("▄▄▄▄▄", hb(CREST, GREEN_LT)),
+        Span::styled("▄", hb(BG, GREEN_LT)),
+        Span::styled("▄", hb(BG, GREEN_LT)),
     ]);
 
-    // Line 2: eyes row
+    // Line 2: eyes — big round eyes with spacing
+    //  ▐ ◕   ◕ ▌
     let (le, re) = match eyes {
         Eyes::Normal => (
-            Span::styled("●", s(EYE_SHINE, EYE_BG)),
-            Span::styled("●", s(EYE_SHINE, EYE_BG)),
+            Span::styled("◕", on(EYE_SHINE, GREEN_LT)),
+            Span::styled("◕", on(EYE_SHINE, GREEN_LT)),
         ),
         Eyes::Happy => (
-            Span::styled("^", s(EYE_BG, GREEN_LT)),
-            Span::styled("^", s(EYE_BG, GREEN_LT)),
+            Span::styled("◡", on(EYE_BG, GREEN_LT)),
+            Span::styled("◡", on(EYE_BG, GREEN_LT)),
         ),
         Eyes::Sparkle => (
-            Span::styled("*", s(Color::Rgb(255, 220, 100), EYE_BG)),
-            Span::styled("*", s(Color::Rgb(255, 220, 100), EYE_BG)),
+            Span::styled("✦", on(Color::Rgb(255, 220, 100), GREEN_LT)),
+            Span::styled("✦", on(Color::Rgb(255, 220, 100), GREEN_LT)),
         ),
         Eyes::LookLeft => (
-            Span::styled("◐", s(EYE_SHINE, EYE_BG)),
-            Span::styled("◐", s(EYE_SHINE, EYE_BG)),
+            Span::styled("◑", on(EYE_SHINE, GREEN_LT)),
+            Span::styled("◑", on(EYE_SHINE, GREEN_LT)),
         ),
         Eyes::LookRight => (
-            Span::styled("◑", s(EYE_SHINE, EYE_BG)),
-            Span::styled("◑", s(EYE_SHINE, EYE_BG)),
+            Span::styled("◐", on(EYE_SHINE, GREEN_LT)),
+            Span::styled("◐", on(EYE_SHINE, GREEN_LT)),
         ),
     };
+    let g = on(GREEN_LT, GREEN_LT);
     let line2 = Line::from(vec![
         Span::raw(" "),
-        Span::styled("▐", fg(GREEN)),
-        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        Span::styled("▐", fg(GREEN_DK)),
+        Span::styled(" ", g),
         le,
-        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        Span::styled("   ", g),
         re,
-        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
-        Span::styled("▌", fg(GREEN)),
+        Span::styled(" ", g),
+        Span::styled("▌", fg(GREEN_DK)),
     ]);
 
-    // Line 3: beak + blush
+    // Line 3: blush + beak — visible mouth using ▼ or ᴡ
+    //  ▐ ◦ ▼ ◦ ▌
     let line3 = Line::from(vec![
         Span::raw(" "),
-        Span::styled("▐", fg(GREEN)),
-        Span::styled(".", s(BLUSH, GREEN_LT)),
-        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
-        Span::styled("▾", s(BEAK, GREEN_LT)),
-        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
-        Span::styled(".", s(BLUSH, GREEN_LT)),
-        Span::styled("▌", fg(GREEN)),
+        Span::styled("▐", fg(GREEN_DK)),
+        Span::styled(" ", g),
+        Span::styled("◦", on(BLUSH, GREEN_LT)),
+        Span::styled(" ", g),
+        Span::styled("▼", on(BEAK, GREEN_LT)),
+        Span::styled(" ", g),
+        Span::styled("◦", on(BLUSH, GREEN_LT)),
+        Span::styled(" ", g),
+        Span::styled("▌", fg(GREEN_DK)),
     ]);
 
-    // Line 4: body top with tiny wings
+    // Line 4: neck/body transition with wings
+    //  ▐▄███████▄▌
     let line4 = Line::from(vec![
-        Span::styled("~", fg(WING)),
-        Span::styled("▐", fg(GREEN)),
-        Span::styled("▄▄▄▄▄▄", s(BELLY, GREEN_LT)),
-        Span::styled("▌", fg(GREEN)),
-        Span::styled("~", fg(WING)),
+        Span::styled("▗", fg(WING)),
+        Span::styled("▐", fg(GREEN_DK)),
+        Span::styled("▄", hb(GREEN_LT, BELLY)),
+        Span::styled("▄▄▄▄▄", hb(GREEN_LT, BELLY)),
+        Span::styled("▄", hb(GREEN_LT, BELLY)),
+        Span::styled("▌", fg(GREEN_DK)),
+        Span::styled("▖", fg(WING)),
     ]);
 
-    // Line 5: round belly
+    // Line 5: belly
+    //  ▐       ▌
     let line5 = Line::from(vec![
         Span::raw(" "),
-        Span::styled("▐", fg(GREEN)),
-        Span::styled("      ", s(BELLY, BELLY)),
-        Span::styled("▌", fg(GREEN)),
+        Span::styled("▐", fg(GREEN_DK)),
+        Span::styled("       ", on(BELLY, BELLY)),
+        Span::styled("▌", fg(GREEN_DK)),
     ]);
 
-    // Line 6: bottom
-    let line6 = Line::from(vec![Span::raw("  "), Span::styled("▀▀▀▀▀▀", s(GREEN, BG))]);
+    // Line 6: bottom — rounded
+    //   ▀▀▀▀▀▀▀
+    let line6 = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("▀", hb(BG, GREEN_DK)),
+        Span::styled("▀▀▀▀▀", hb(BG, BELLY)),
+        Span::styled("▀", hb(BG, GREEN_DK)),
+    ]);
 
     // Line 7: tiny feet
+    //    ▫ ▫
     let line7 = Line::from(vec![
         Span::raw("   "),
-        Span::styled("▀▘", fg(FEET)),
-        Span::raw("  "),
-        Span::styled("▀▘", fg(FEET)),
+        Span::styled("█", fg(FEET)),
+        Span::raw("   "),
+        Span::styled("█", fg(FEET)),
     ]);
 
     vec![line0, line1, line2, line3, line4, line5, line6, line7]

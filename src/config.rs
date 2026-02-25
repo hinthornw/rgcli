@@ -22,7 +22,13 @@ pub fn config_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("unable to determine home directory"))?
         .home_dir()
         .to_path_buf();
-    Ok(home.join(".lsc"))
+    Ok(home.join(".ailsd"))
+}
+
+pub fn cache_dir() -> Result<PathBuf> {
+    let dir = config_dir()?.join("cache");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 pub fn config_path() -> Result<String> {

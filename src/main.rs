@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::ui::{print_error, print_logo};
 
 #[derive(Parser, Debug)]
-#[command(name = "lsc", about = "CLI for chatting with LangSmith deployments")]
+#[command(name = "ailsd", about = "CLI for chatting with LangSmith deployments")]
 struct Cli {
     /// Resume an existing thread
     #[arg(long)]
@@ -56,7 +56,7 @@ impl std::fmt::Display for AuthOption {
 }
 
 fn version_string() -> String {
-    option_env!("LSC_VERSION")
+    option_env!("AILSD_VERSION")
         .unwrap_or(env!("CARGO_PKG_VERSION"))
         .to_string()
 }
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.version {
-        println!("lsc {}", version_string());
+        println!("ailsd {}", version_string());
         return Ok(());
     }
 
@@ -80,14 +80,14 @@ async fn main() -> Result<()> {
 
 async fn run(resume: bool) -> Result<()> {
     if !config::exists() {
-        println!("Welcome to lsc! Let's configure your connection.\n");
+        println!("Welcome to ailsd! Let's configure your connection.\n");
         run_configure().await.context("configuration failed")?;
         println!();
     }
 
     let mut cfg = config::load().context("failed to load config")?;
 
-    let config_path = config::config_path().unwrap_or_else(|_| "~/.lsc/config.yaml".into());
+    let config_path = config::config_path().unwrap_or_else(|_| "~/.ailsd/config.yaml".into());
     print_logo(&version_string(), &cfg.endpoint, &config_path);
     println!();
 
@@ -206,7 +206,7 @@ async fn run_configure() -> Result<()> {
     };
 
     config::save(&cfg)?;
-    let path = config::config_path().unwrap_or_else(|_| "~/.lsc/config.yaml".into());
+    let path = config::config_path().unwrap_or_else(|_| "~/.ailsd/config.yaml".into());
     println!("\nConfiguration saved to {}", path);
 
     Ok(())

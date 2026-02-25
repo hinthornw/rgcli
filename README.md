@@ -1,47 +1,53 @@
-# lsc
+# ailsd
 
 A CLI for chatting with LangSmith deployments.
 
 ```
    ▄█▀▀█▄
-  ▄██▄░▄█    lsc v0.1.0
+  ▄██▄░▄█    ailsd v0.1.0
   ███████    https://your-deployment.langgraph.app
-  ▀█░░░█     ~/.lsc/config.yaml
+  ▀█░░░█     ~/.ailsd/config.yaml
    █▀ █▀
 ```
 
 ## Installation
 
+### Quick Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wfh/ailsd/main/install.sh | sh
+```
+
 ### Homebrew (macOS/Linux)
 
 ```bash
 brew tap wfh/tap
-brew install lsc
+brew install ailsd
 ```
 
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/wfh/lsc.git
+cargo install --git https://github.com/wfh/ailsd.git
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/wfh/lsc.git
-cd lsc
+git clone https://github.com/wfh/ailsd.git
+cd ailsd
 make build
-./target/release/lsc
+./target/release/ailsd
 ```
 
 ## Usage
 
 ```bash
 # Start a new conversation (configure on first run)
-lsc
+ailsd
 
 # Resume an existing thread
-lsc --resume
+ailsd --resume
 ```
 
 ### Slash Commands
@@ -68,7 +74,7 @@ On first run, you'll be prompted to configure:
 2. **Authentication** - None, API key, or custom headers
 3. **Assistant ID** - The graph/assistant to use
 
-Config is stored at `~/.lsc/config.yaml`
+Config is stored at `~/.ailsd/config.yaml`
 
 ## Development
 

@@ -33,7 +33,7 @@ fn logo_title(text: &str) -> String {
 }
 
 pub fn print_logo(version: &str, endpoint: &str, config_path: &str) {
-    let title = format!("{} {}", logo_title("lsc"), system_style(version));
+    let title = format!("{} {}", logo_title("ailsd"), system_style(version));
     let info1 = system_style(endpoint);
     let info2 = system_style(config_path);
 

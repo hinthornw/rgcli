@@ -1,4 +1,4 @@
-# Releasing lsc (Rust)
+# Releasing ailsd (Rust)
 
 ## One-time Setup
 
@@ -18,7 +18,7 @@ Initialize it with a Formula directory:
 git clone https://github.com/wfh/homebrew-tap.git
 cd homebrew-tap
 mkdir Formula
-echo "# Homebrew Tap\n\nInstall formulas:\n\n\`\`\`bash\nbrew tap wfh/tap\nbrew install lsc\n\`\`\`" > README.md
+echo "# Homebrew Tap\n\nInstall formulas:\n\n\`\`\`bash\nbrew tap wfh/tap\nbrew install ailsd\n\`\`\`" > README.md
 git add .
 git commit -m "Initial commit"
 git push
@@ -35,7 +35,7 @@ GoReleaser needs a token to push to the homebrew-tap repo:
 
 ### 3. Add the Token as a Repository Secret
 
-1. Go to your `lsc` repository settings
+1. Go to your `ailsd` repository settings
 2. Secrets and variables → Actions
 3. New repository secret
 4. Name: `HOMEBREW_TAP_GITHUB_TOKEN`
@@ -59,14 +59,14 @@ The GitHub Action will:
 2. Create a GitHub Release with the binaries
 3. Push the Homebrew formula to wfh/homebrew-tap
 
-Check progress at: https://github.com/wfh/lsc/actions
+Check progress at: https://github.com/wfh/ailsd/actions
 
 ### 3. Verify Installation
 
 ```bash
 brew tap wfh/tap
-brew install lsc
-lsc --help
+brew install ailsd
+ailsd --help
 ```
 
 ## Local Testing

@@ -1,6 +1,6 @@
 .PHONY: all build test lint format clean install
 
-BINARY=lsc
+BINARY=ailsd
 
 all: format lint build test
 
@@ -23,7 +23,7 @@ format:
 ## clean: Clean build artifacts and config
 clean:
 	rm -rf target
-	rm -f ~/.lsc/config.yaml
+	rm -f ~/.ailsd/config.yaml
 
 ## install: Install binary to ~/.cargo/bin
 install:

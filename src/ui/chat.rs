@@ -48,7 +48,6 @@ const TIPS: &[&str] = &[
     "Double-tap Esc to cancel a streaming response",
     "Use /export to save the conversation as markdown",
     "Press Ctrl+B to navigate between screens (threads, runs, store...)",
-    "Use /threads, /runs, /store, /logs to jump to any screen",
 ];
 
 #[derive(Debug)]
@@ -70,14 +69,12 @@ pub(crate) enum Action {
     SwitchContext(String),
     Help,
     NewThread,
-    PickThread,
     Clear,
     Attach(String),
     ListAssistants,
     SwitchAssistant(String),
     Export,
     Mode(String),
-    NavigateScreen(super::screen::Screen),
     ExitFor(ChatExit),
 }
 
@@ -352,7 +349,6 @@ impl ChatState {
                 ScreenAction::None
             }
             Action::NewThread => ScreenAction::ChatExit(ChatExit::NewThread),
-            Action::PickThread => ScreenAction::Navigate(super::screen::Screen::Threads),
             Action::Clear => {
                 self.messages.clear();
                 self.auto_scroll = true;
@@ -388,7 +384,6 @@ impl ChatState {
                 reset_textarea(self);
                 ScreenAction::None
             }
-            Action::NavigateScreen(screen) => ScreenAction::Navigate(screen),
             Action::ExitFor(exit) => ScreenAction::ChatExit(exit),
             Action::None => ScreenAction::None,
         }
@@ -923,6 +918,13 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
         lines.push(Line::from(Span::styled(
             format!("{spinner} {verb}..."),
             styles::system_style_r(),
+        )));
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            format!("  tip: {}", tip_for_tick(app.spinner_idx)),
+            Style::new()
+                .fg(Color::Rgb(80, 80, 80))
+                .add_modifier(Modifier::ITALIC),
         )));
     }
 
@@ -1643,21 +1645,6 @@ fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action {
             if value == "/new" {
                 return Action::NewThread;
             }
-            if value == "/threads" {
-                return Action::PickThread;
-            }
-            if value == "/runs" {
-                return Action::NavigateScreen(super::screen::Screen::Runs);
-            }
-            if value == "/store" {
-                return Action::NavigateScreen(super::screen::Screen::Store);
-            }
-            if value == "/crons" {
-                return Action::NavigateScreen(super::screen::Screen::Crons);
-            }
-            if value == "/logs" {
-                return Action::NavigateScreen(super::screen::Screen::Logs);
-            }
             if value == "/doctor" {
                 return Action::ExitFor(ChatExit::RunDoctor);
             }
@@ -1680,9 +1667,6 @@ fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action {
             }
             if value == "/export" {
                 return Action::Export;
-            }
-            if value == "/assistants" {
-                return Action::NavigateScreen(super::screen::Screen::Assistants);
             }
             if value == "/assistant" {
                 return Action::ListAssistants;
@@ -2040,12 +2024,18 @@ fn export_conversation(app: &mut ChatState) {
 }
 
 fn random_tip() -> &'static str {
-    let idx = std::time::SystemTime::now()
+    // Mix seconds with a prime multiplier for better distribution
+    let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() as usize
-        % TIPS.len();
-    TIPS[idx]
+        .as_secs() as usize;
+    TIPS[(secs.wrapping_mul(2654435761)) % TIPS.len()]
+}
+
+fn tip_for_tick(tick: usize) -> &'static str {
+    // Rotate tips every ~8 seconds (100 ticks at 80ms interval)
+    let idx = tick / 100;
+    TIPS[(idx.wrapping_mul(2654435761)) % TIPS.len()]
 }
 
 // --- Slash commands ---
@@ -2062,36 +2052,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Start a new thread",
     },
     SlashCommand {
-        name: "/threads",
-        desc: "Browse and switch threads",
-    },
-    SlashCommand {
         name: "/context",
         desc: "Switch context (/context <name>)",
     },
     SlashCommand {
-        name: "/assistants",
-        desc: "Browse assistants",
-    },
-    SlashCommand {
         name: "/assistant",
         desc: "Switch assistant (/assistant <id>)",
-    },
-    SlashCommand {
-        name: "/runs",
-        desc: "Browse runs",
-    },
-    SlashCommand {
-        name: "/store",
-        desc: "Browse store",
-    },
-    SlashCommand {
-        name: "/crons",
-        desc: "Browse cron jobs",
-    },
-    SlashCommand {
-        name: "/logs",
-        desc: "Browse recent logs",
     },
     SlashCommand {
         name: "/bench",

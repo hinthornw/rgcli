@@ -9,8 +9,15 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            targets: x86_64-apple-darwin,aarch64-apple-darwin
+          - os: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,19 +27,69 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin,x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+          targets: ${{ matrix.targets }}
 
-      - name: Install cargo-zigbuild and zig
+      - name: Install cross-compilation tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
         run: |
-          brew install zig
-          cargo install cargo-zigbuild
+          for target in $(echo "${{ matrix.targets }}" | tr ',' ' '); do
+            cargo build --release --target "$target"
+            mkdir -p artifacts
+            cp "target/${target}/release/ailsd" "artifacts/ailsd-${target}"
+          done
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+          name: binaries-${{ matrix.os }}
+          path: artifacts/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Package archives
+        run: |
+          mkdir -p dist
+          version="${GITHUB_REF_NAME#v}"
+          declare -A target_map=(
+            ["x86_64-apple-darwin"]="darwin_amd64"
+            ["aarch64-apple-darwin"]="darwin_arm64"
+            ["x86_64-unknown-linux-gnu"]="linux_amd64"
+            ["aarch64-unknown-linux-gnu"]="linux_arm64"
+          )
+          for target in "${!target_map[@]}"; do
+            bin="artifacts/ailsd-${target}"
+            if [ -f "$bin" ]; then
+              chmod +x "$bin"
+              slug="${target_map[$target]}"
+              archive="ailsd_${version}_${slug}.tar.gz"
+              # tar needs the binary named "ailsd"
+              cp "$bin" ailsd
+              chmod +x ailsd
+              tar czf "dist/${archive}" ailsd
+              rm ailsd
+            fi
+          done
+          cd dist && sha256sum *.tar.gz > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

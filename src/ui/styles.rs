@@ -32,10 +32,11 @@ fn logo_title(text: &str) -> String {
     format!("{}", text.cyan().bold())
 }
 
-pub fn print_logo(version: &str, endpoint: &str, config_path: &str) {
+pub fn print_logo(version: &str, endpoint: &str, config_path: &str, context_info: &str) {
     let title = format!("{} {}", logo_title("ailsd"), system_style(version));
     let info1 = system_style(endpoint);
-    let info2 = system_style(config_path);
+    let info2 = system_style(context_info);
+    let info3 = system_style(config_path);
 
     let lines = [
         format!("   {}", logo_accent("▄█▀▀█▄")),
@@ -48,7 +49,7 @@ pub fn print_logo(version: &str, endpoint: &str, config_path: &str) {
         ),
         format!("  {}    {}", logo_body("███████"), info1),
         format!("  {}     {}", logo_body("▀█░░░█"), info2),
-        format!("   {}", logo_body("█▀ █▀")),
+        format!("   {}     {}", logo_body("█▀ █▀"), info3),
     ];
 
     for line in lines {

@@ -166,6 +166,10 @@ fn prompt_message() -> Result<InputOutcome> {
                             if value == "/configure" {
                                 return Ok(InputOutcome::Configure);
                             }
+                            // Clear rendered input before returning
+                            let mut out = stdout();
+                            queue!(out, MoveTo(origin.0, origin.1), Clear(ClearType::FromCursorDown))?;
+                            out.flush()?;
                             return Ok(InputOutcome::Message(value));
                         }
                     }

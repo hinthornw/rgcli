@@ -1,5 +1,6 @@
 mod api;
 mod config;
+mod context;
 mod ui;
 mod update;
 
@@ -11,7 +12,7 @@ use inquire::{Confirm, Password, Select, Text};
 
 use crate::api::Client;
 use crate::config::Config;
-use crate::ui::{print_error, print_logo};
+use crate::ui::{print_error, print_logo, system_text};
 
 #[derive(Parser, Debug)]
 #[command(name = "ailsd", about = "CLI for chatting with LangSmith deployments")]
@@ -32,9 +33,29 @@ struct Cli {
 enum Command {
     /// Upgrade to the latest version
     Upgrade,
+    /// Manage deployment contexts
+    Context {
+        #[command(subcommand)]
+        action: ContextAction,
+    },
 }
 
-const DEFAULT_ENDPOINT: &str = "";
+#[derive(Subcommand, Debug)]
+enum ContextAction {
+    /// List all contexts
+    List,
+    /// Show active context
+    Current,
+    /// Switch active context
+    Use { name: String },
+    /// Create a new context
+    Create { name: String },
+    /// Show context details
+    Show { name: Option<String> },
+    /// Delete a context
+    Delete { name: String },
+}
+
 const DEFAULT_ASSISTANT: &str = "docs_agent";
 
 #[derive(Clone, Copy)]
@@ -79,12 +100,30 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(Command::Upgrade) = cli.command {
-        if let Err(err) = update::run_upgrade().await {
-            eprintln!("{}", print_error(&err.to_string()));
-            std::process::exit(1);
+    match cli.command {
+        Some(Command::Upgrade) => {
+            if let Err(err) = update::run_upgrade().await {
+                eprintln!("{}", print_error(&err.to_string()));
+                std::process::exit(1);
+            }
+            return Ok(());
         }
-        return Ok(());
+        Some(Command::Context { action }) => {
+            let result = match action {
+                ContextAction::List => context::list(),
+                ContextAction::Current => context::current(),
+                ContextAction::Use { name } => context::use_context(&name),
+                ContextAction::Create { name } => context::create_interactive(&name),
+                ContextAction::Show { name } => context::show(name.as_deref()),
+                ContextAction::Delete { name } => context::delete(&name),
+            };
+            if let Err(err) = result {
+                eprintln!("{}", print_error(&err.to_string()));
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        None => {}
     }
 
     if let Err(err) = run(cli.resume).await {
@@ -97,8 +136,9 @@ async fn main() -> Result<()> {
 
 async fn run(resume: bool) -> Result<()> {
     if !config::exists() {
-        println!("Welcome to ailsd! Let's configure your connection.\n");
-        run_configure().await.context("configuration failed")?;
+        println!("Welcome to ailsd! Let's configure your first context.\n");
+        let cfg = run_configure_inner(None).context("configuration failed")?;
+        config::save_context("default", &cfg)?;
         println!();
     }
 
@@ -110,10 +150,22 @@ async fn run(resume: bool) -> Result<()> {
     });
 
     let config_path = config::config_path().unwrap_or_else(|_| "~/.ailsd/config.yaml".into());
-    print_logo(&version_string(), &cfg.endpoint, &config_path);
+
+    // Determine context info for display
+    let context_info = match config::load_with_source() {
+        Ok((_, config::ConfigSource::Local(path))) => {
+            format!("context: local ({})", path.display())
+        }
+        Ok((_, config::ConfigSource::Global(name))) => {
+            format!("context: {}", name)
+        }
+        Err(_) => "context: default".to_string(),
+    };
+
+    print_logo(&version_string(), &cfg.endpoint, &config_path, &context_info);
 
     if let Some(notice) = update::pending_update_notice() {
-        println!("  {}", ui::system_text(&notice));
+        println!("  {}", system_text(&notice));
     }
     println!();
 
@@ -132,8 +184,10 @@ async fn run(resume: bool) -> Result<()> {
     loop {
         match ui::run_chat_loop(&client, &cfg.assistant_id, &thread_id, &history).await? {
             ui::ChatExit::Configure => {
-                run_configure().await.context("configuration failed")?;
-                cfg = config::load().context("failed to reload config")?;
+                let context_name = config::current_context_name();
+                let new_cfg = run_configure_inner(Some(&cfg)).context("configuration failed")?;
+                config::save_context(&context_name, &new_cfg)?;
+                cfg = new_cfg;
                 client = Client::new(&cfg)?;
                 history.clear();
             }
@@ -142,20 +196,20 @@ async fn run(resume: bool) -> Result<()> {
     }
 }
 
-async fn run_configure() -> Result<()> {
-    let mut endpoint = DEFAULT_ENDPOINT.to_string();
+/// Interactive configure flow. Returns a Config. Used by both initial setup and context creation.
+pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
+    let mut endpoint = String::new();
     let mut api_key = String::new();
     let mut assistant_id = DEFAULT_ASSISTANT.to_string();
     let mut custom_headers: HashMap<String, String> = HashMap::new();
-    if config::exists() {
-        if let Ok(cfg) = config::load() {
-            if !cfg.endpoint.is_empty() {
-                endpoint = cfg.endpoint;
-            }
-            api_key = cfg.api_key;
-            assistant_id = cfg.assistant_id;
-            custom_headers = cfg.custom_headers;
+
+    if let Some(cfg) = existing {
+        if !cfg.endpoint.is_empty() {
+            endpoint = cfg.endpoint.clone();
         }
+        api_key = cfg.api_key.clone();
+        assistant_id = cfg.assistant_id.clone();
+        custom_headers = cfg.custom_headers.clone();
     }
 
     let mut endpoint_prompt = Text::new("Endpoint URL")
@@ -170,8 +224,9 @@ async fn run_configure() -> Result<()> {
         anyhow::bail!("endpoint URL is required");
     }
 
-    let auth_start = if !api_key.is_empty() {
-        1
+    // Determine auth starting cursor
+    let auth_start = if !api_key.is_empty() || std::env::var("LANGSMITH_API_KEY").is_ok() {
+        1 // default to API key if we have one
     } else if !custom_headers.is_empty() {
         2
     } else {
@@ -188,9 +243,34 @@ async fn run_configure() -> Result<()> {
 
     match auth_type {
         "apikey" => {
-            api_key = Password::new("LangSmith API Key")
-                .with_help_message("Your API key (starts with lsv2_)")
-                .prompt()?;
+            // Check for env var
+            let env_key = std::env::var("LANGSMITH_API_KEY").unwrap_or_default();
+            let has_env = !env_key.is_empty();
+            let has_stored = !api_key.is_empty();
+
+            if has_env && !has_stored {
+                // Env var available, ask if they want to use it or enter a different one
+                let use_env = Confirm::new("Use LANGSMITH_API_KEY from environment?")
+                    .with_default(true)
+                    .prompt()?;
+                if !use_env {
+                    api_key = Password::new("LangSmith API Key")
+                        .with_help_message("Your API key (starts with lsv2_)")
+                        .prompt()?;
+                } else {
+                    // Store empty — will use env var at runtime
+                    api_key = String::new();
+                }
+            } else {
+                let mut pwd = Password::new("LangSmith API Key")
+                    .with_help_message("Your API key (starts with lsv2_)");
+                if has_env {
+                    pwd = pwd.with_help_message(
+                        "Your API key (starts with lsv2_). Leave empty to use LANGSMITH_API_KEY env var.",
+                    );
+                }
+                api_key = pwd.prompt()?;
+            }
             custom_headers.clear();
         }
         "headers" => {
@@ -227,18 +307,12 @@ async fn run_configure() -> Result<()> {
         assistant_id = DEFAULT_ASSISTANT.to_string();
     }
 
-    let cfg = Config {
+    Ok(Config {
         endpoint,
         api_key,
         assistant_id,
         custom_headers,
-    };
-
-    config::save(&cfg)?;
-    let path = config::config_path().unwrap_or_else(|_| "~/.ailsd/config.yaml".into());
-    println!("\nConfiguration saved to {}", path);
-
-    Ok(())
+    })
 }
 
 async fn handle_resume(client: &Client) -> Result<Option<(String, Vec<api::Message>)>> {

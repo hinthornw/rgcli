@@ -152,7 +152,7 @@ where
     if is_end_event(&event) {
         return;
     }
-    if !is_message_event(&event) && !event.event.is_empty() {
+    if !is_message_event(&event) {
         return;
     }
     let Ok(chunk) = parse_message_chunk(&event.data) else {

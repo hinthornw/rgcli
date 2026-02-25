@@ -264,6 +264,16 @@ pub fn build(
     Ok(())
 }
 
+/// Check if uvx is available.
+fn find_uvx() -> Option<String> {
+    for candidate in &["uvx", "uv"] {
+        if which::which(candidate).is_ok() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 /// Find the Python interpreter, preferring python3 over python.
 fn find_python() -> Result<String, String> {
     for candidate in &["python3", "python"] {
@@ -272,9 +282,8 @@ fn find_python() -> Result<String, String> {
         }
     }
     Err(
-        "Python not found. The `ailsd deploy dev` command requires Python >= 3.11 with \
-         langgraph-cli[inmem] installed.\n\
-         Install with: pip install -U \"langgraph-cli[inmem]\""
+        "Python not found. Install uv (https://docs.astral.sh/uv/) for automatic setup, \
+         or install Python >= 3.11 with: pip install -U \"langgraph-cli[inmem]\""
             .to_string(),
     )
 }
@@ -308,30 +317,40 @@ pub fn dev(
         );
     }
 
-    let python = find_python()?;
-
-    // Pre-check that langgraph_api is importable
-    let check = Command::new(&python)
-        .args(["-c", "from langgraph_api.cli import run_server"])
-        .output();
-
-    match check {
-        Ok(output) if !output.status.success() => {
-            return Err("Required package 'langgraph-api' is not installed.\n\
-                 Please install it with:\n\n\
-                     pip install -U \"langgraph-cli[inmem]\"\n\n\
-                 Note: The in-mem server requires Python 3.11 or higher."
-                .to_string());
-        }
-        Err(_) => {
-            return Err(format!(
-                "Failed to run {python}. The `ailsd deploy dev` command requires Python >= 3.11 with \
-                 langgraph-cli[inmem] installed.\n\
-                 Install with: pip install -U \"langgraph-cli[inmem]\""
-            ));
-        }
-        _ => {}
+    // Determine how to run: prefer uvx for zero-install, fall back to direct python
+    enum RunMode {
+        Uvx(String),     // uvx or uv binary path
+        Python(String),  // python3 or python binary
     }
+
+    let run_mode = if let Some(uvx) = find_uvx() {
+        eprintln!("Using {uvx} for automatic dependency management...");
+        RunMode::Uvx(uvx)
+    } else {
+        let python = find_python()?;
+        // Pre-check that langgraph_api is importable
+        let check = Command::new(&python)
+            .args(["-c", "from langgraph_api.cli import run_server"])
+            .output();
+        match check {
+            Ok(output) if !output.status.success() => {
+                return Err("Required package 'langgraph-api' is not installed.\n\
+                     Install uv for automatic setup: https://docs.astral.sh/uv/\n\
+                     Or install manually: pip install -U \"langgraph-cli[inmem]\"\n\n\
+                     Note: The in-mem server requires Python 3.11 or higher."
+                    .to_string());
+            }
+            Err(_) => {
+                return Err(format!(
+                    "Failed to run {python}. Install uv for automatic setup: \
+                     https://docs.astral.sh/uv/\n\
+                     Or install manually: pip install -U \"langgraph-cli[inmem]\""
+                ));
+            }
+            _ => {}
+        }
+        RunMode::Python(python)
+    };
 
     // Build a JSON config object to pass via stdin.
     let dev_config = serde_json::json!({
@@ -393,16 +412,42 @@ run_server(
 
     eprintln!("Starting LangGraph API server in development mode...");
 
-    // Spawn Python subprocess with config on stdin
-    let mut child = Command::new(&python)
-        .arg("-c")
-        .arg(python_code)
-        .current_dir(config_path.parent().unwrap_or_else(|| Path::new(".")))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("Failed to start Python: {e}"))?;
+    let work_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+
+    // Spawn subprocess with config on stdin
+    let mut child = match &run_mode {
+        RunMode::Uvx(bin) => {
+            let mut cmd = if bin == "uv" {
+                let mut c = Command::new(bin);
+                c.arg("tool").arg("run");
+                c
+            } else {
+                Command::new(bin)
+            };
+            cmd.args([
+                "--from", "langgraph-cli[inmem]",
+                "--python", "3.11",
+                "python", "-c", python_code,
+            ])
+            .current_dir(work_dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("Failed to start uvx: {e}"))?
+        }
+        RunMode::Python(python) => {
+            Command::new(python)
+                .arg("-c")
+                .arg(python_code)
+                .current_dir(work_dir)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+                .map_err(|e| format!("Failed to start Python: {e}"))?
+        }
+    };
 
     // Write JSON config to stdin
     if let Some(ref mut stdin) = child.stdin {

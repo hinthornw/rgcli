@@ -45,11 +45,24 @@ pub fn builtin_default_config() -> Config {
     }
 }
 
+/// Built-in local dev config pointing to localhost:2024.
+pub fn local_dev_config() -> Config {
+    Config {
+        endpoint: "http://localhost:2024".to_string(),
+        api_key: String::new(),
+        assistant_id: "agent".to_string(),
+        custom_headers: HashMap::new(),
+    }
+}
+
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             current_context: default_context_name(),
-            contexts: HashMap::from([("default".to_string(), builtin_default_config())]),
+            contexts: HashMap::from([
+                ("default".to_string(), builtin_default_config()),
+                ("local-dev".to_string(), local_dev_config()),
+            ]),
         }
     }
 }

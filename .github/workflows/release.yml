@@ -48,6 +48,8 @@ jobs:
           version: 1.0
 
       - name: Build
+        env:
+          AILSD_VERSION: ${{ github.ref_name }}
         run: |
           for target in $(echo "${{ matrix.targets }}" | tr ',' ' '); do
             cargo build --release --target "$target"

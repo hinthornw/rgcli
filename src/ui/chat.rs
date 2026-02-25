@@ -38,7 +38,7 @@ const THINKING_VERBS: &[&str] = &[
 const TOOL_RESULT_MAX_LEN: usize = 200;
 const TIPS: &[&str] = &[
     "Press F12 to toggle devtools with TTFT and token metrics",
-    "Use /attach <file> to send images to multimodal agents",
+    "Drag and drop images into the terminal to attach them",
     "Use /assistant to switch between different graph assistants",
     "Use /context <name> to switch deployment contexts on the fly",
     "Pipe mode: echo \"question\" | ailsd for non-interactive use",
@@ -246,6 +246,43 @@ impl ChatState {
     ) -> super::screen::ScreenAction {
         let action = handle_terminal_event(self, event);
         self.execute_action(action, client, thread_id)
+    }
+
+    /// Handle pasted text — detect file paths and auto-attach, otherwise insert as text.
+    pub fn handle_paste(&mut self, text: &str) -> super::screen::ScreenAction {
+        let trimmed = text.trim();
+
+        // Check if it looks like one or more file paths (drag-and-drop)
+        let mut attached_any = false;
+        for line in trimmed.lines() {
+            let path = line.trim().trim_matches('\'').trim_matches('"');
+            if path.is_empty() {
+                continue;
+            }
+            let p = std::path::Path::new(path);
+            if p.exists() && p.is_file() {
+                // Check if it's an image or supported file type
+                let lower = path.to_lowercase();
+                let is_attachable = lower.ends_with(".png")
+                    || lower.ends_with(".jpg")
+                    || lower.ends_with(".jpeg")
+                    || lower.ends_with(".gif")
+                    || lower.ends_with(".webp")
+                    || lower.ends_with(".pdf");
+                if is_attachable {
+                    handle_attach(self, path);
+                    attached_any = true;
+                    continue;
+                }
+            }
+        }
+
+        if !attached_any {
+            // Not a file path — insert as regular text into textarea
+            self.textarea.insert_str(trimmed);
+        }
+
+        super::screen::ScreenAction::None
     }
 
     fn execute_action(

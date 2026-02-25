@@ -60,14 +60,22 @@ impl TuiApp {
 
     pub async fn run(mut self) -> Result<ChatExit> {
         terminal::enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen)?;
+        execute!(
+            stdout(),
+            EnterAlternateScreen,
+            crossterm::event::EnableBracketedPaste,
+        )?;
         let backend = CrosstermBackend::new(stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
         let result = self.event_loop(&mut terminal).await;
 
-        execute!(stdout(), LeaveAlternateScreen)?;
+        execute!(
+            stdout(),
+            crossterm::event::DisableBracketedPaste,
+            LeaveAlternateScreen,
+        )?;
         terminal::disable_raw_mode()?;
 
         result
@@ -134,6 +142,15 @@ impl TuiApp {
     }
 
     fn handle_event(&mut self, event: Event) -> Option<ChatExit> {
+        // Paste events go directly to chat screen
+        if let Event::Paste(ref text) = event {
+            if self.screen == Screen::Chat {
+                let action = self.chat.handle_paste(text);
+                return self.handle_action(action);
+            }
+            return None;
+        }
+
         let Event::Key(key) = event else {
             return None;
         };

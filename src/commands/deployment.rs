@@ -762,3 +762,58 @@ pub fn new(_path: Option<&str>, _template: Option<&str>) -> Result<(), String> {
     // This will be implemented when the templates module is available
     Err("Template creation not yet implemented. This will be available when the deploy::templates module is complete.".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_uvx_returns_absolute_path() {
+        // If uvx/uv is available, the result must be an absolute path, not a bare name.
+        // This is the regression that caused "No such file or directory" when Command::new()
+        // received just "uvx" without the full path.
+        if let Some(path) = find_uvx() {
+            assert!(
+                path.starts_with('/'),
+                "find_uvx() should return an absolute path, got: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn find_python_returns_absolute_path() {
+        if let Ok(path) = find_python() {
+            assert!(
+                path.starts_with('/'),
+                "find_python() should return an absolute path, got: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn find_uvx_prefers_uvx_over_uv() {
+        // If both exist, uvx should be preferred (it's checked first)
+        if let Some(path) = find_uvx() {
+            let has_uvx = which::which("uvx").is_ok();
+            if has_uvx {
+                assert!(
+                    path.ends_with("/uvx"),
+                    "should prefer uvx when available, got: {path}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn find_python_prefers_python3() {
+        if let Ok(path) = find_python() {
+            let has_python3 = which::which("python3").is_ok();
+            if has_python3 {
+                assert!(
+                    path.ends_with("/python3"),
+                    "should prefer python3 when available, got: {path}"
+                );
+            }
+        }
+    }
+}

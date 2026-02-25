@@ -86,6 +86,8 @@ struct Cli {
 enum Command {
     /// Upgrade to the latest version
     Upgrade,
+    /// Remove ailsd from your system
+    Uninstall,
     /// Diagnose deployment connectivity and configuration
     Doctor,
     /// Manage deployment contexts (like kubectl config)
@@ -540,6 +542,13 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Command::Upgrade) => {
             if let Err(err) = update::run_upgrade().await {
+                eprintln!("{}", print_error(&err.to_string()));
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        Some(Command::Uninstall) => {
+            if let Err(err) = commands::uninstall::run() {
                 eprintln!("{}", print_error(&err.to_string()));
                 std::process::exit(1);
             }

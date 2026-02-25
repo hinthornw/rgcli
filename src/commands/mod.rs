@@ -6,3 +6,4 @@ pub mod logs;
 pub mod runs;
 pub mod store;
 pub mod threads;
+pub mod uninstall;

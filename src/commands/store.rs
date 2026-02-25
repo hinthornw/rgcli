@@ -2,8 +2,12 @@ use anyhow::Result;
 
 use crate::api::Client;
 
+fn parse_namespace(namespace: &str) -> Vec<&str> {
+    namespace.split('.').collect()
+}
+
 pub async fn get_item(client: &Client, namespace: &str, key: &str) -> Result<()> {
-    let ns_parts: Vec<&str> = namespace.split('.').collect();
+    let ns_parts = parse_namespace(namespace);
     let url = format!("{}/store/items", client.endpoint());
     let body = serde_json::json!({
         "namespace": ns_parts,
@@ -20,7 +24,7 @@ pub async fn put_item(
     key: &str,
     value: &str,
 ) -> Result<()> {
-    let ns_parts: Vec<&str> = namespace.split('.').collect();
+    let ns_parts = parse_namespace(namespace);
     let val: serde_json::Value = serde_json::from_str(value)?;
     let url = format!("{}/store/items", client.endpoint());
     let body = serde_json::json!({
@@ -34,7 +38,7 @@ pub async fn put_item(
 }
 
 pub async fn delete_item(client: &Client, namespace: &str, key: &str) -> Result<()> {
-    let ns_parts: Vec<&str> = namespace.split('.').collect();
+    let ns_parts = parse_namespace(namespace);
     let url = format!("{}/store/items", client.endpoint());
     let body = serde_json::json!({
         "namespace": ns_parts,
@@ -51,7 +55,7 @@ pub async fn search(
     query: Option<&str>,
     limit: usize,
 ) -> Result<()> {
-    let ns_parts: Vec<&str> = namespace.split('.').collect();
+    let ns_parts = parse_namespace(namespace);
     let url = format!("{}/store/items/search", client.endpoint());
     let mut body = serde_json::json!({
         "namespace_prefix": ns_parts,

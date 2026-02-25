@@ -211,13 +211,13 @@ impl App {
     }
 }
 
-#[allow(dead_code)]
 pub struct ChatConfig {
     pub version: String,
     pub endpoint: String,
     pub config_path: String,
     pub context_info: String,
     pub context_names: Vec<String>,
+    #[allow(dead_code)]
     pub assistant_id: String,
     pub available_assistants: Vec<(String, String)>,
     pub tenant_id: Option<String>,
@@ -509,7 +509,8 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
 
     let ps = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
-    let theme = &ts.themes["base16-ocean.dark"];
+    let theme = ts.themes.get("base16-ocean.dark")
+        .unwrap_or_else(|| ts.themes.values().next().unwrap());
 
     for raw_line in text.lines() {
         if raw_line.starts_with("```") {

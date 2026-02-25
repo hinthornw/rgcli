@@ -22,8 +22,8 @@ pub struct ToolCall {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Attachment {
+    #[allow(dead_code)]
     pub filename: String,
     pub mime_type: String,
     pub base64_data: String,

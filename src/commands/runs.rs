@@ -3,6 +3,19 @@ use comfy_table::{Cell, Color, Table};
 
 use crate::api::Client;
 
+fn status_cell(status: &str) -> Cell {
+    match status {
+        "success" => Cell::new(status).fg(Color::Green),
+        "error" => Cell::new(status).fg(Color::Red),
+        "running" | "pending" => Cell::new(status).fg(Color::Yellow),
+        _ => Cell::new(status),
+    }
+}
+
+fn shorten_id(id: &str) -> String {
+    id.chars().take(12).collect()
+}
+
 pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> {
     let url = format!("{}/threads/{}/runs", client.endpoint(), thread_id);
     let body = serde_json::json!({ "limit": limit });
@@ -19,19 +32,13 @@ pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> 
 
     for r in runs {
         let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
-        let id_short: String = id.chars().take(12).collect();
+        let id_short = shorten_id(id);
         let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
         let created = r
             .get("created_at")
             .and_then(|v| v.as_str())
             .unwrap_or("-");
-        let status_cell = match status {
-            "success" => Cell::new(status).fg(Color::Green),
-            "error" => Cell::new(status).fg(Color::Red),
-            "running" | "pending" => Cell::new(status).fg(Color::Yellow),
-            _ => Cell::new(status),
-        };
-        table.add_row(vec![Cell::new(id_short).fg(Color::Cyan), status_cell, Cell::new(created)]);
+        table.add_row(vec![Cell::new(id_short).fg(Color::Cyan), status_cell(status), Cell::new(created)]);
     }
 
     println!("{table}");
@@ -82,20 +89,13 @@ pub async fn watch(client: &Client, thread_id: &str, interval_secs: u64) -> Resu
 
                     for r in runs {
                         let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
-                        let id_short: String = id.chars().take(12).collect();
+                        let id_short = shorten_id(id);
                         let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
                         let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
 
-                        let status_cell = match status {
-                            "success" => Cell::new(status).fg(Color::Green),
-                            "error" => Cell::new(status).fg(Color::Red),
-                            "running" | "pending" => Cell::new(status).fg(Color::Yellow),
-                            _ => Cell::new(status),
-                        };
-
                         table.add_row(vec![
                             Cell::new(id_short).fg(Color::Cyan),
-                            status_cell,
+                            status_cell(status),
                             Cell::new(created),
                         ]);
                     }

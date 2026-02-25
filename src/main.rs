@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod context;
+mod langsmith;
 mod ui;
 mod update;
 
@@ -212,21 +213,9 @@ pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
         custom_headers = cfg.custom_headers.clone();
     }
 
-    let mut endpoint_prompt = Text::new("Endpoint URL")
-        .with_placeholder("https://your-deployment.langgraph.app")
-        .with_help_message("Your LangGraph deployment URL");
-    if !endpoint.is_empty() {
-        endpoint_prompt = endpoint_prompt.with_default(&endpoint);
-    }
-    endpoint = endpoint_prompt.prompt()?;
-
-    if endpoint.trim().is_empty() {
-        anyhow::bail!("endpoint URL is required");
-    }
-
-    // Determine auth starting cursor
+    // --- Authentication ---
     let auth_start = if !api_key.is_empty() || std::env::var("LANGSMITH_API_KEY").is_ok() {
-        1 // default to API key if we have one
+        1
     } else if !custom_headers.is_empty() {
         2
     } else {
@@ -243,13 +232,11 @@ pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
 
     match auth_type {
         "apikey" => {
-            // Check for env var
             let env_key = std::env::var("LANGSMITH_API_KEY").unwrap_or_default();
             let has_env = !env_key.is_empty();
             let has_stored = !api_key.is_empty();
 
             if has_env && !has_stored {
-                // Env var available, ask if they want to use it or enter a different one
                 let use_env = Confirm::new("Use LANGSMITH_API_KEY from environment?")
                     .with_default(true)
                     .prompt()?;
@@ -258,7 +245,6 @@ pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
                         .with_help_message("Your API key (starts with lsv2_)")
                         .prompt()?;
                 } else {
-                    // Store empty — will use env var at runtime
                     api_key = String::new();
                 }
             } else {
@@ -299,6 +285,39 @@ pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
         }
     }
 
+    // --- Endpoint: offer deployment search if we have an API key ---
+    let effective_key = if api_key.is_empty() {
+        std::env::var("LANGSMITH_API_KEY").unwrap_or_default()
+    } else {
+        api_key.clone()
+    };
+
+    if !effective_key.is_empty() && endpoint.is_empty() {
+        let search = Confirm::new("Search LangSmith for deployments?")
+            .with_default(true)
+            .prompt()?;
+        if search {
+            endpoint = search_and_pick_deployment(&effective_key)?;
+        }
+    }
+
+    if endpoint.is_empty() {
+        let mut endpoint_prompt = Text::new("Endpoint URL")
+            .with_placeholder("https://your-deployment.langgraph.app")
+            .with_help_message("Your LangGraph deployment URL");
+        if let Some(cfg) = existing {
+            if !cfg.endpoint.is_empty() {
+                endpoint_prompt = endpoint_prompt.with_default(&cfg.endpoint);
+            }
+        }
+        endpoint = endpoint_prompt.prompt()?;
+    }
+
+    if endpoint.trim().is_empty() {
+        anyhow::bail!("endpoint URL is required");
+    }
+
+    // --- Assistant ID ---
     assistant_id = Text::new("Assistant ID")
         .with_help_message("Press Enter to accept default")
         .with_default(&assistant_id)
@@ -313,6 +332,56 @@ pub fn run_configure_inner(existing: Option<&Config>) -> Result<Config> {
         assistant_id,
         custom_headers,
     })
+}
+
+fn search_and_pick_deployment(api_key: &str) -> Result<String> {
+    let rt = tokio::runtime::Handle::current();
+    loop {
+        let query = Text::new("Search deployments")
+            .with_help_message("Type a name to search (or leave empty to list all)")
+            .prompt()?;
+
+        let deployments = rt.block_on(langsmith::search_deployments(api_key, query.trim()))?;
+
+        if deployments.is_empty() {
+            println!("No deployments found.");
+            let retry = Confirm::new("Try another search?")
+                .with_default(true)
+                .prompt()?;
+            if retry {
+                continue;
+            }
+            return Ok(String::new());
+        }
+
+        // Filter to deployments that have a URL
+        let with_url: Vec<&langsmith::Deployment> =
+            deployments.iter().filter(|d| d.url().is_some()).collect();
+
+        if with_url.is_empty() {
+            println!("Found {} deployments but none have a URL configured.", deployments.len());
+            let retry = Confirm::new("Try another search?")
+                .with_default(true)
+                .prompt()?;
+            if retry {
+                continue;
+            }
+            return Ok(String::new());
+        }
+
+        let labels: Vec<String> = with_url.iter().map(|d| d.to_string()).collect();
+        let selection = Select::new("Select deployment", labels).prompt()?;
+
+        // Find the selected deployment by matching the display string
+        let selected = with_url
+            .iter()
+            .find(|d| d.to_string() == selection)
+            .unwrap();
+
+        let url = selected.url().unwrap().to_string();
+        println!("Selected: {}", url);
+        return Ok(url);
+    }
 }
 
 async fn handle_resume(client: &Client) -> Result<Option<(String, Vec<api::Message>)>> {

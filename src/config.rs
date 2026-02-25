@@ -40,7 +40,7 @@ pub fn builtin_default_config() -> Config {
     Config {
         endpoint: CHAT_LANGCHAIN_ENDPOINT.to_string(),
         api_key: String::new(),
-        assistant_id: "agent".to_string(),
+        assistant_id: "docs_agent".to_string(),
         custom_headers: HashMap::new(),
     }
 }

@@ -994,6 +994,19 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
         Err(_) => Vec::new(),
     };
 
+    // Auto-resolve assistant ID: if configured ID isn't in the available list, use the first one
+    let mut assistant_id = cfg.assistant_id.clone();
+    if !available_assistants.is_empty()
+        && !available_assistants.iter().any(|(id, _)| *id == assistant_id)
+    {
+        let (first_id, first_name) = &available_assistants[0];
+        eprintln!(
+            "Note: assistant '{}' not found, using '{}' ({})",
+            assistant_id, first_name, first_id
+        );
+        assistant_id = first_id.clone();
+    }
+
     let mut chat_config = ui::ChatConfig {
         version: version_string(),
         endpoint: cfg.endpoint.clone(),
@@ -1008,7 +1021,7 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
     loop {
         match ui::run_chat_loop(
             &client,
-            &cfg.assistant_id,
+            &assistant_id,
             &thread_id,
             &history,
             &chat_config,

@@ -163,10 +163,11 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area:
         )));
     }
 
+    let max_scroll = compute_auto_scroll(&lines, area);
     let scroll = if app.auto_scroll {
-        compute_auto_scroll(&lines, area)
+        max_scroll
     } else {
-        app.scroll_offset
+        max_scroll.saturating_sub(app.scroll_offset)
     };
 
     let paragraph = Paragraph::new(lines)

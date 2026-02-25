@@ -204,6 +204,45 @@ impl Client {
         Ok(resp.json().await?)
     }
 
+    /// Get deployment info (version, etc.)
+    pub async fn get_info(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/info", self.endpoint);
+        let resp = self
+            .http
+            .get(url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("failed to get info: {} - {}", status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// List available assistants.
+    pub async fn list_assistants(&self) -> Result<Vec<serde_json::Value>> {
+        let url = format!("{}/assistants/search", self.endpoint);
+        let resp = self
+            .http
+            .post(url)
+            .headers(self.headers.clone())
+            .body("{}")
+            .send()
+            .await?;
+
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("failed to list assistants: {} - {}", status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
     /// Cancel a running run.
     pub async fn cancel_run(&self, thread_id: &str, run_id: &str) -> Result<()> {
         let url = format!(

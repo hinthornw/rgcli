@@ -1,42 +1,34 @@
-use std::io::{Write, stdout};
+use std::io::{stdout, Write};
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal::{self, Clear, ClearType};
-use crossterm::{execute, queue};
+use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::execute;
 
-use crate::api::{Thread, get_messages};
+use crate::api::{get_messages, Thread};
 use crate::ui::styles::system_text;
-
-struct TerminalGuard;
-
-impl TerminalGuard {
-    fn enter() -> Result<Self> {
-        terminal::enable_raw_mode()?;
-        execute!(stdout(), Hide)?;
-        Ok(Self)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = execute!(stdout(), Show);
-        let _ = terminal::disable_raw_mode();
-    }
-}
 
 pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
     if threads.is_empty() {
         return Ok(None);
     }
 
-    let _guard = TerminalGuard::enter()?;
-    let mut cursor = 0usize;
-    let origin = crossterm::cursor::position().unwrap_or((0, 0));
+    terminal::enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen, Hide)?;
 
-    render_picker(origin, threads, cursor)?;
+    let result = pick_thread_inner(threads);
+
+    execute!(stdout(), LeaveAlternateScreen, Show)?;
+    terminal::disable_raw_mode()?;
+
+    result
+}
+
+fn pick_thread_inner(threads: &[Thread]) -> Result<Option<Thread>> {
+    let mut cursor = 0usize;
+    render_picker(threads, cursor)?;
 
     loop {
         if !event::poll(Duration::from_millis(50))? {
@@ -46,59 +38,46 @@ pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
             match key.code {
                 KeyCode::Esc => return Ok(None),
                 KeyCode::Char('c')
-                    if key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
                 {
                     return Ok(None);
                 }
-                KeyCode::Up => {
+                KeyCode::Up | KeyCode::BackTab => {
                     cursor = cursor.saturating_sub(1);
                 }
-                KeyCode::Down => {
+                KeyCode::Down | KeyCode::Tab => {
                     if cursor + 1 < threads.len() {
                         cursor += 1;
                     }
-                }
-                KeyCode::Tab => {
-                    if cursor + 1 < threads.len() {
-                        cursor += 1;
-                    }
-                }
-                KeyCode::BackTab => {
-                    cursor = cursor.saturating_sub(1);
                 }
                 KeyCode::Enter => return Ok(Some(threads[cursor].clone())),
                 _ => {}
             }
-            render_picker(origin, threads, cursor)?;
+            render_picker(threads, cursor)?;
         }
     }
 }
 
-fn render_picker(origin: (u16, u16), threads: &[Thread], cursor: usize) -> Result<()> {
+fn render_picker(threads: &[Thread], cursor: usize) -> Result<()> {
     let mut out = stdout();
-    queue!(
-        out,
-        MoveTo(origin.0, origin.1),
-        Clear(ClearType::FromCursorDown)
-    )?;
-    writeln!(out, "Select a thread to resume:\n")?;
+    execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
+
+    writeln!(out, "Select a thread to resume:\r\n\r")?;
 
     for (i, thread) in threads.iter().enumerate() {
         let preview = thread_preview(thread);
-        let thread_id = thread.thread_id.chars().take(8).collect::<String>();
+        let thread_id: String = thread.thread_id.chars().take(8).collect();
         let line = format!("{} - {}", thread_id, preview);
         if i == cursor {
-            writeln!(out, "{}", system_text(&format!("> {}", line)))?;
+            writeln!(out, "  {}\r", system_text(&format!("> {}", line)))?;
         } else {
-            writeln!(out, "  {}", line)?;
+            writeln!(out, "    {}\r", line)?;
         }
     }
 
     writeln!(
         out,
-        "\n{}",
+        "\r\n  {}\r",
         system_text("(↑/↓ to move, enter to select, esc to cancel)")
     )?;
     out.flush()?;
@@ -122,8 +101,10 @@ fn thread_preview(thread: &Thread) -> String {
 }
 
 fn truncate_preview(text: &str) -> String {
-    if text.len() > 50 {
-        format!("{}...", &text[..47])
+    let text = text.lines().next().unwrap_or(text);
+    if text.chars().count() > 50 {
+        let truncated: String = text.chars().take(47).collect();
+        format!("{truncated}...")
     } else {
         text.to_string()
     }

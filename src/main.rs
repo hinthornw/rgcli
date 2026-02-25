@@ -81,6 +81,8 @@ struct Cli {
 enum Command {
     /// Upgrade to the latest version
     Upgrade,
+    /// Diagnose deployment connectivity and configuration
+    Doctor,
     /// Manage deployment contexts (like kubectl config)
     #[command(after_help = "\x1b[1mExamples:\x1b[0m
   ailsd context create staging
@@ -169,6 +171,13 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Command::Upgrade) => {
             if let Err(err) = update::run_upgrade().await {
+                eprintln!("{}", print_error(&err.to_string()));
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        Some(Command::Doctor) => {
+            if let Err(err) = run_doctor().await {
                 eprintln!("{}", print_error(&err.to_string()));
                 std::process::exit(1);
             }
@@ -280,7 +289,14 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
 
     let mut client = Client::new(&cfg)?;
 
-    let (thread_id, mut history) = if resume {
+    let (mut thread_id, mut history) = if let Some(tid) = thread_id_arg {
+        // Direct thread ID provided — load its history
+        let history = match client.get_thread_state(tid).await {
+            Ok(state) => crate::api::get_messages(&state.values),
+            Err(_) => Vec::new(),
+        };
+        (tid.to_string(), history)
+    } else if resume {
         match handle_resume(&client).await? {
             Some((thread_id, history)) => (thread_id, history),
             None => return Ok(()),
@@ -290,7 +306,7 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
         (thread.thread_id, Vec::new())
     };
 
-    let chat_config = ui::ChatConfig {
+    let mut chat_config = ui::ChatConfig {
         version: version_string(),
         endpoint: cfg.endpoint.clone(),
         config_path,
@@ -314,10 +330,38 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 cfg = new_cfg;
                 client = Client::new(&cfg)?;
                 history.clear();
+                chat_config.endpoint = cfg.endpoint.clone();
+                chat_config.context_info = format!("context: {}", config::current_context_name());
+            }
+            ui::ChatExit::SwitchContext(name) => {
+                context::use_context(&name)?;
+                cfg = config::load().context("failed to load config")?;
+                client = Client::new(&cfg)?;
+                history.clear();
+                let thread = client.create_thread().await?;
+                thread_id = thread.thread_id;
+                chat_config.endpoint = cfg.endpoint.clone();
+                chat_config.context_info = format!("context: {}", name);
+            }
+            ui::ChatExit::NewThread => {
+                let thread = client.create_thread().await?;
+                thread_id = thread.thread_id;
+                history.clear();
+            }
+            ui::ChatExit::PickThread => {
+                match handle_resume(&client).await? {
+                    Some((tid, hist)) => {
+                        thread_id = tid;
+                        history = hist;
+                    }
+                    None => {
+                        // User cancelled picker, just re-enter the current chat
+                    }
+                }
             }
             ui::ChatExit::Quit => {
                 println!(
-                    "To resume this thread:\n  ailsd --resume --thread-id {}",
+                    "To resume this thread:\n  ailsd --thread-id {}",
                     thread_id
                 );
                 return Ok(());
@@ -514,6 +558,72 @@ fn search_and_pick_deployment(api_key: &str) -> Result<String> {
         println!("Selected: {}", url);
         return Ok(url);
     }
+}
+
+async fn run_doctor() -> Result<()> {
+    let cfg = config::load().context("failed to load config")?;
+    let client = Client::new(&cfg)?;
+
+    println!("Diagnosing deployment: {}\n", cfg.endpoint);
+
+    // 1. Connectivity
+    print!("  Connectivity ... ");
+    let start = std::time::Instant::now();
+    match client.get_info().await {
+        Ok(info) => {
+            let latency = start.elapsed().as_millis();
+            println!("OK ({}ms)", latency);
+            if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
+                println!("  API version  ... {}", version);
+            }
+            if let Some(lg_version) = info.get("langgraph_api_version").and_then(|v| v.as_str()) {
+                println!("  LangGraph    ... {}", lg_version);
+            }
+        }
+        Err(err) => {
+            println!("FAILED");
+            println!("    Error: {}", err);
+            println!("\n  Check your endpoint URL and network connectivity.");
+            return Ok(());
+        }
+    }
+
+    // 2. Auth
+    print!("  Auth         ... ");
+    match client.list_assistants().await {
+        Ok(assistants) => {
+            println!("OK");
+            println!("  Assistants   ... {} found", assistants.len());
+            for a in &assistants {
+                if let Some(id) = a.get("assistant_id").and_then(|v| v.as_str()) {
+                    let name = a
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(unnamed)");
+                    println!("    - {} ({})", id, name);
+                }
+            }
+        }
+        Err(err) => {
+            println!("FAILED");
+            println!("    Error: {}", err);
+            println!("\n  Check your API key or authentication headers.");
+            return Ok(());
+        }
+    }
+
+    // 3. Thread creation
+    print!("  Threads      ... ");
+    match client.create_thread().await {
+        Ok(_) => println!("OK (can create threads)"),
+        Err(err) => {
+            println!("FAILED");
+            println!("    Error: {}", err);
+        }
+    }
+
+    println!("\nAll checks passed!");
+    Ok(())
 }
 
 async fn handle_resume(client: &Client) -> Result<Option<(String, Vec<api::Message>)>> {

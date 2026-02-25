@@ -29,6 +29,9 @@ const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 #[derive(Debug)]
 pub enum ChatExit {
     Configure,
+    SwitchContext(String),
+    NewThread,
+    PickThread,
     Quit,
 }
 
@@ -38,6 +41,11 @@ enum Action {
     Cancel,
     Quit,
     Configure,
+    SwitchContext(String),
+    Help,
+    NewThread,
+    PickThread,
+    Clear,
 }
 
 #[derive(Clone)]
@@ -78,6 +86,27 @@ struct App {
     update_rx: Option<mpsc::UnboundedReceiver<String>>,
     context_name: String,
     welcome_lines: Vec<Line<'static>>,
+    thread_id: String,
+
+    // Dev toolbar
+    devtools: bool,
+    metrics: RunMetrics,
+}
+
+#[derive(Default, Clone)]
+struct RunMetrics {
+    run_started_at: Option<Instant>,
+    first_token_at: Option<Instant>,
+    last_token_at: Option<Instant>,
+    token_count: usize,
+    total_chars: usize,
+    run_id: Option<String>,
+    // Last completed run stats (persisted after Done)
+    last_ttft_ms: Option<u128>,
+    last_tokens_per_sec: Option<f64>,
+    last_total_ms: Option<u128>,
+    last_token_count: Option<usize>,
+    last_run_id: Option<String>,
 }
 
 impl App {
@@ -105,6 +134,9 @@ impl App {
             update_rx: Some(update_rx),
             context_name: context_name.to_string(),
             welcome_lines: Vec::new(),
+            thread_id: String::new(),
+            devtools: false,
+            metrics: RunMetrics::default(),
         }
     }
 
@@ -135,12 +167,27 @@ pub async fn run_chat_loop(
 
     let mut app = App::new(&chat_config.context_info, update_rx);
 
+    // Fetch deployment info
+    let deploy_info = match client.get_info().await {
+        Ok(info) => {
+            let mut parts = Vec::new();
+            if let Some(v) = info.get("langgraph_api_version").and_then(|v| v.as_str()) {
+                parts.push(format!("langgraph: {v}"));
+            } else if let Some(v) = info.get("version").and_then(|v| v.as_str()) {
+                parts.push(format!("api: {v}"));
+            }
+            if parts.is_empty() { None } else { Some(parts.join(" | ")) }
+        }
+        Err(_) => None,
+    };
+
     // Add logo as initial chat content
     app.welcome_lines = styles::logo_lines(
         &chat_config.version,
         &chat_config.endpoint,
         &chat_config.config_path,
         &chat_config.context_info,
+        deploy_info.as_deref(),
     );
 
     // Load history
@@ -215,9 +262,7 @@ async fn run_event_loop(
                         } else {
                             start_run(client, thread_id, assistant_id, &msg, None, app);
                         }
-                        app.textarea = TextArea::default();
-                        app.textarea.set_placeholder_text(PLACEHOLDER);
-                        app.textarea.set_cursor_line_style(ratatui::style::Style::default());
+                        reset_textarea(app);
                     }
                     Action::Cancel => {
                         if let Some(run_id) = app.active_run_id.clone() {
@@ -234,6 +279,24 @@ async fn run_event_loop(
                     }
                     Action::Configure => {
                         return Ok(ChatExit::Configure);
+                    }
+                    Action::SwitchContext(name) => {
+                        return Ok(ChatExit::SwitchContext(name));
+                    }
+                    Action::Help => {
+                        show_help(app);
+                        reset_textarea(app);
+                    }
+                    Action::NewThread => {
+                        return Ok(ChatExit::NewThread);
+                    }
+                    Action::PickThread => {
+                        return Ok(ChatExit::PickThread);
+                    }
+                    Action::Clear => {
+                        app.messages.clear();
+                        app.auto_scroll = true;
+                        reset_textarea(app);
                     }
                     Action::None => {}
                 }
@@ -254,19 +317,34 @@ async fn run_event_loop(
 // --- Drawing ---
 
 fn draw(frame: &mut ratatui::Frame, app: &mut App) {
-    let input_height = (app.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2; // +2 for borders
+    let input_height = (app.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
     let area = frame.area();
 
-    let chunks = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(input_height),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    if app.devtools {
+        let chunks = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Length(input_height),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
 
-    render_chat(frame, app, chunks[0]);
-    render_input(frame, app, chunks[1]);
-    render_status(frame, app, chunks[2]);
+        render_chat(frame, app, chunks[0]);
+        render_input(frame, app, chunks[1]);
+        render_devtools(frame, app, chunks[2]);
+        render_status(frame, app, chunks[3]);
+    } else {
+        let chunks = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Length(input_height),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+        render_chat(frame, app, chunks[0]);
+        render_input(frame, app, chunks[1]);
+        render_status(frame, app, chunks[2]);
+    }
 }
 
 fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
@@ -430,6 +508,58 @@ fn render_input(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     }
 }
 
+fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let mut parts: Vec<Span> = vec![Span::styled(" devtools ", styles::user_style())];
+
+    // Show live metrics during streaming, otherwise last completed run
+    if app.is_streaming() || app.is_waiting {
+        if let Some(started) = app.metrics.run_started_at {
+            let elapsed = started.elapsed().as_millis();
+            if let Some(first) = app.metrics.first_token_at {
+                let ttft = first.duration_since(started).as_millis();
+                parts.push(Span::raw(format!("TTFT: {}ms ", ttft)));
+                let stream_dur = first.elapsed().as_secs_f64();
+                if stream_dur > 0.0 && app.metrics.token_count > 1 {
+                    let tps = (app.metrics.token_count - 1) as f64 / stream_dur;
+                    parts.push(Span::raw(format!("{:.0} tok/s ", tps)));
+                }
+                parts.push(Span::raw(format!(
+                    "tokens: {} ",
+                    app.metrics.token_count
+                )));
+            } else {
+                parts.push(Span::raw(format!("waiting: {}ms ", elapsed)));
+            }
+        }
+    } else if app.metrics.last_total_ms.is_some() {
+        if let Some(ttft) = app.metrics.last_ttft_ms {
+            parts.push(Span::raw(format!("TTFT: {}ms ", ttft)));
+        }
+        if let Some(tps) = app.metrics.last_tokens_per_sec {
+            parts.push(Span::raw(format!("{:.0} tok/s ", tps)));
+        }
+        if let Some(total) = app.metrics.last_total_ms {
+            parts.push(Span::raw(format!("total: {}ms ", total)));
+        }
+        if let Some(count) = app.metrics.last_token_count {
+            parts.push(Span::raw(format!("tokens: {} ", count)));
+        }
+    }
+
+    if let Some(rid) = app.metrics.run_id.as_deref().or(app.metrics.last_run_id.as_deref()) {
+        let short = if rid.len() > 8 { &rid[..8] } else { rid };
+        parts.push(Span::styled(format!("run:{short}"), styles::system_style_r()));
+    }
+
+    let line = Line::from(parts);
+    let bar = Paragraph::new(line).style(
+        ratatui::style::Style::new()
+            .fg(ratatui::style::Color::White)
+            .bg(ratatui::style::Color::Rgb(40, 40, 40)),
+    );
+    frame.render_widget(bar, area);
+}
+
 fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
 
@@ -500,9 +630,16 @@ fn handle_stream_event(
 ) {
     match event {
         StreamEvent::RunStarted(id) => {
-            app.active_run_id = Some(id);
+            app.active_run_id = Some(id.clone());
+            app.metrics.run_id = Some(id);
         }
         StreamEvent::Token(token) => {
+            if app.metrics.first_token_at.is_none() {
+                app.metrics.first_token_at = Some(Instant::now());
+            }
+            app.metrics.last_token_at = Some(Instant::now());
+            app.metrics.token_count += 1;
+            app.metrics.total_chars += token.len();
             app.is_waiting = false;
             app.streaming_text.push_str(&token);
             app.auto_scroll = true;
@@ -519,6 +656,26 @@ fn handle_stream_event(
             app.stream_rx = None;
             app.active_run_id = None;
             app.is_waiting = false;
+
+            // Snapshot metrics from completed run
+            if let Some(started) = app.metrics.run_started_at {
+                app.metrics.last_total_ms = Some(started.elapsed().as_millis());
+                app.metrics.last_ttft_ms = app
+                    .metrics
+                    .first_token_at
+                    .map(|t| t.duration_since(started).as_millis());
+                app.metrics.last_token_count = Some(app.metrics.token_count);
+                app.metrics.last_run_id = app.metrics.run_id.clone();
+                if let (Some(first), Some(last)) =
+                    (app.metrics.first_token_at, app.metrics.last_token_at)
+                {
+                    let dur = last.duration_since(first).as_secs_f64();
+                    if dur > 0.0 && app.metrics.token_count > 1 {
+                        app.metrics.last_tokens_per_sec =
+                            Some((app.metrics.token_count - 1) as f64 / dur);
+                    }
+                }
+            }
 
             // Drain queue
             if let Some(msg) = app.pending_messages.pop_front() {
@@ -549,6 +706,12 @@ fn start_run(
     app.spinner_idx = 0;
     app.active_run_id = None;
     app.streaming_text.clear();
+    app.metrics.run_started_at = Some(Instant::now());
+    app.metrics.first_token_at = None;
+    app.metrics.last_token_at = None;
+    app.metrics.token_count = 0;
+    app.metrics.total_chars = 0;
+    app.metrics.run_id = None;
 
     let client = client.clone();
     let thread_id = thread_id.to_string();
@@ -643,6 +806,32 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
             if value == "/configure" {
                 return Action::Configure;
             }
+            if value == "/help" {
+                return Action::Help;
+            }
+            if let Some(name) = value.strip_prefix("/context ") {
+                let name = name.trim();
+                if !name.is_empty() {
+                    return Action::SwitchContext(name.to_string());
+                }
+            }
+            if value == "/context" {
+                return Action::Help;
+            }
+            if value == "/new" {
+                return Action::NewThread;
+            }
+            if value == "/threads" {
+                return Action::PickThread;
+            }
+            if value == "/clear" {
+                return Action::Clear;
+            }
+            if value == "/devtools" {
+                app.devtools = !app.devtools;
+                reset_textarea(app);
+                return Action::None;
+            }
             return Action::Send(value);
         }
         // Scroll
@@ -656,6 +845,9 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
             } else {
                 app.auto_scroll = true;
             }
+        }
+        KeyCode::F(12) => {
+            app.devtools = !app.devtools;
         }
         KeyCode::Tab => {
             update_completions(&app.textarea, &mut app.completions, &mut app.show_complete);
@@ -771,18 +963,60 @@ struct SlashCommand {
 
 const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
+        name: "/new",
+        desc: "Start a new thread",
+    },
+    SlashCommand {
+        name: "/threads",
+        desc: "Browse and switch threads",
+    },
+    SlashCommand {
+        name: "/context",
+        desc: "Switch context (/context <name>)",
+    },
+    SlashCommand {
         name: "/configure",
         desc: "Update connection settings",
     },
     SlashCommand {
-        name: "/quit",
-        desc: "Exit the chat",
+        name: "/clear",
+        desc: "Clear chat display",
+    },
+    SlashCommand {
+        name: "/devtools",
+        desc: "Toggle developer toolbar (F12)",
+    },
+    SlashCommand {
+        name: "/help",
+        desc: "Show available commands",
     },
     SlashCommand {
         name: "/exit",
         desc: "Exit the chat",
     },
 ];
+
+fn reset_textarea(app: &mut App) {
+    app.textarea = TextArea::default();
+    app.textarea.set_placeholder_text(PLACEHOLDER);
+    app.textarea.set_cursor_line_style(ratatui::style::Style::default());
+}
+
+fn show_help(app: &mut App) {
+    app.messages.push(ChatMessage::System("Commands:".to_string()));
+    for cmd in SLASH_COMMANDS {
+        app.messages.push(ChatMessage::System(format!("  {:<16} {}", cmd.name, cmd.desc)));
+    }
+    app.messages.push(ChatMessage::System(String::new()));
+    app.messages.push(ChatMessage::System("Keys:".to_string()));
+    app.messages.push(ChatMessage::System("  Enter          Send message".to_string()));
+    app.messages.push(ChatMessage::System("  Alt+Enter      Insert newline".to_string()));
+    app.messages.push(ChatMessage::System("  Esc Esc        Cancel active run".to_string()));
+    app.messages.push(ChatMessage::System("  Ctrl+C Ctrl+C  Quit".to_string()));
+    app.messages.push(ChatMessage::System("  PageUp/Down    Scroll chat history".to_string()));
+    app.messages.push(ChatMessage::System("  F12            Toggle devtools".to_string()));
+    app.auto_scroll = true;
+}
 
 fn slash_completions(text: &str) -> Vec<usize> {
     SLASH_COMMANDS

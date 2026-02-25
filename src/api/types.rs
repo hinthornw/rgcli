@@ -148,11 +148,17 @@ pub fn get_messages(values: &Value) -> Vec<Message> {
                 .to_string();
             }
         }
-        let content = obj
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let content = match obj.get("content") {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(arr)) => {
+                // AI messages often have content as [{type: "text", text: "..."}]
+                arr.iter()
+                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+            }
+            _ => String::new(),
+        };
         if !role.is_empty() && !content.is_empty() {
             result.push(Message { role, content });
         }

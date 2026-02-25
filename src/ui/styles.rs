@@ -63,8 +63,9 @@ pub fn logo_lines(
     endpoint: &str,
     config_path: &str,
     context_info: &str,
+    deploy_info: Option<&str>,
 ) -> Vec<Line<'static>> {
-    vec![
+    let mut lines = vec![
         Line::from(vec![Span::styled("   ▄█▀▀█▄", logo_accent_style())]),
         Line::from(vec![
             Span::styled("  ▄██", logo_accent_style()),
@@ -90,6 +91,13 @@ pub fn logo_lines(
             Span::raw("     "),
             Span::styled(config_path.to_string(), system_style_r()),
         ]),
-        Line::default(),
-    ]
+    ];
+    if let Some(info) = deploy_info {
+        lines.push(Line::from(vec![
+            Span::raw("              "),
+            Span::styled(info.to_string(), system_style_r()),
+        ]));
+    }
+    lines.push(Line::default());
+    lines
 }

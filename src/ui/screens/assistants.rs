@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::api::Client;
@@ -21,12 +21,27 @@ pub struct AssistantsScreen {
 impl AssistantsScreen {
     pub fn new() -> Self {
         Self {
-            table: ResourceTable::new("Assistants", vec![
-                Column { name: "ID".to_string(), width_pct: 30 },
-                Column { name: "Name".to_string(), width_pct: 25 },
-                Column { name: "Graph".to_string(), width_pct: 20 },
-                Column { name: "Updated".to_string(), width_pct: 25 },
-            ]),
+            table: ResourceTable::new(
+                "Assistants",
+                vec![
+                    Column {
+                        name: "ID".to_string(),
+                        width_pct: 30,
+                    },
+                    Column {
+                        name: "Name".to_string(),
+                        width_pct: 25,
+                    },
+                    Column {
+                        name: "Graph".to_string(),
+                        width_pct: 20,
+                    },
+                    Column {
+                        name: "Updated".to_string(),
+                        width_pct: 25,
+                    },
+                ],
+            ),
             loaded: false,
             async_rx: None,
         }
@@ -46,10 +61,26 @@ impl AssistantsScreen {
                     let rows: Vec<Vec<String>> = assistants
                         .iter()
                         .map(|a| {
-                            let id = a.get("assistant_id").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let graph = a.get("graph_id").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let updated = a.get("updated_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
+                            let id = a
+                                .get("assistant_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let name = a
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let graph = a
+                                .get("graph_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let updated = a
+                                .get("updated_at")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
                             vec![id, name, graph, updated]
                         })
                         .collect();

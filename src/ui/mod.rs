@@ -1,5 +1,7 @@
 mod app;
 mod chat;
+#[allow(dead_code)]
+pub(crate) mod mascot;
 mod picker;
 mod screen;
 mod screens;

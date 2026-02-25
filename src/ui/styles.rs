@@ -1,6 +1,6 @@
 use crossterm::style::Stylize;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 // --- ratatui styles (for TUI rendering) ---
 
@@ -46,18 +46,6 @@ pub fn system_text(msg: &str) -> String {
 
 // --- ratatui logo (for in-TUI display) ---
 
-fn logo_accent_style() -> Style {
-    Style::new().fg(Color::Yellow)
-}
-
-fn logo_body_style() -> Style {
-    Style::new().fg(Color::DarkGray)
-}
-
-fn logo_title_style() -> Style {
-    Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-}
-
 pub fn logo_lines(
     version: &str,
     endpoint: &str,
@@ -65,39 +53,5 @@ pub fn logo_lines(
     context_info: &str,
     deploy_info: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![Span::styled("   ▄█▀▀█▄", logo_accent_style())]),
-        Line::from(vec![
-            Span::styled("  ▄██", logo_accent_style()),
-            Span::styled("▄░▄", logo_body_style()),
-            Span::styled("█", logo_accent_style()),
-            Span::raw("    "),
-            Span::styled("ailsd", logo_title_style()),
-            Span::raw(" "),
-            Span::styled(version.to_string(), system_style_r()),
-        ]),
-        Line::from(vec![
-            Span::styled("  ███████", logo_body_style()),
-            Span::raw("    "),
-            Span::styled(endpoint.to_string(), system_style_r()),
-        ]),
-        Line::from(vec![
-            Span::styled("  ▀█░░░█", logo_body_style()),
-            Span::raw("     "),
-            Span::styled(context_info.to_string(), system_style_r()),
-        ]),
-        Line::from(vec![
-            Span::styled("   █▀ █▀", logo_body_style()),
-            Span::raw("     "),
-            Span::styled(config_path.to_string(), system_style_r()),
-        ]),
-    ];
-    if let Some(info) = deploy_info {
-        lines.push(Line::from(vec![
-            Span::raw("              "),
-            Span::styled(info.to_string(), system_style_r()),
-        ]));
-    }
-    lines.push(Line::default());
-    lines
+    super::mascot::logo_with_parrot(version, endpoint, config_path, context_info, deploy_info)
 }

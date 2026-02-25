@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::api::Client;
@@ -22,12 +22,27 @@ pub struct RunsScreen {
 impl RunsScreen {
     pub fn new() -> Self {
         Self {
-            table: ResourceTable::new("Runs", vec![
-                Column { name: "Run ID".to_string(), width_pct: 20 },
-                Column { name: "Status".to_string(), width_pct: 15 },
-                Column { name: "Thread".to_string(), width_pct: 20 },
-                Column { name: "Created".to_string(), width_pct: 25 },
-            ]),
+            table: ResourceTable::new(
+                "Runs",
+                vec![
+                    Column {
+                        name: "Run ID".to_string(),
+                        width_pct: 20,
+                    },
+                    Column {
+                        name: "Status".to_string(),
+                        width_pct: 15,
+                    },
+                    Column {
+                        name: "Thread".to_string(),
+                        width_pct: 20,
+                    },
+                    Column {
+                        name: "Created".to_string(),
+                        width_pct: 25,
+                    },
+                ],
+            ),
             thread_filter: None,
             loaded: false,
             async_rx: None,
@@ -62,8 +77,16 @@ impl RunsScreen {
                             .map(|r| {
                                 let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
                                 let id_short: String = id.chars().take(12).collect();
-                                let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                                let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
+                                let status = r
+                                    .get("status")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-")
+                                    .to_string();
+                                let created = r
+                                    .get("created_at")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-")
+                                    .to_string();
                                 vec![id_short, status, tid_short.clone(), created]
                             })
                             .collect();
@@ -80,16 +103,31 @@ impl RunsScreen {
                         let mut all_rows = Vec::new();
                         for thread in &threads {
                             let tid_short: String = thread.thread_id.chars().take(8).collect();
-                            let url = format!("{}/threads/{}/runs", client.endpoint(), thread.thread_id);
+                            let url =
+                                format!("{}/threads/{}/runs", client.endpoint(), thread.thread_id);
                             let body = serde_json::json!({ "limit": 5 });
                             if let Ok(resp) = client.post_json(&url, &body).await {
                                 let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
                                 for r in runs {
-                                    let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+                                    let id =
+                                        r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
                                     let id_short: String = id.chars().take(12).collect();
-                                    let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                                    let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                                    all_rows.push(vec![id_short, status, tid_short.clone(), created]);
+                                    let status = r
+                                        .get("status")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("-")
+                                        .to_string();
+                                    let created = r
+                                        .get("created_at")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("-")
+                                        .to_string();
+                                    all_rows.push(vec![
+                                        id_short,
+                                        status,
+                                        tid_short.clone(),
+                                        created,
+                                    ]);
                                 }
                             }
                         }

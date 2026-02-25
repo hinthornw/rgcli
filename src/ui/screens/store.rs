@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
 use tokio::sync::mpsc;
 
 use crate::api::Client;
@@ -31,13 +31,26 @@ pub struct StoreScreen {
 impl StoreScreen {
     pub fn new() -> Self {
         Self {
-            namespace_table: ResourceTable::new("Namespaces", vec![
-                Column { name: "Namespace".to_string(), width_pct: 100 },
-            ]),
-            items_table: ResourceTable::new("Items", vec![
-                Column { name: "Key".to_string(), width_pct: 40 },
-                Column { name: "Value (preview)".to_string(), width_pct: 60 },
-            ]),
+            namespace_table: ResourceTable::new(
+                "Namespaces",
+                vec![Column {
+                    name: "Namespace".to_string(),
+                    width_pct: 100,
+                }],
+            ),
+            items_table: ResourceTable::new(
+                "Items",
+                vec![
+                    Column {
+                        name: "Key".to_string(),
+                        width_pct: 40,
+                    },
+                    Column {
+                        name: "Value (preview)".to_string(),
+                        width_pct: 60,
+                    },
+                ],
+            ),
             active_pane: Pane::Left,
             namespace_paths: Vec::new(),
             loaded: false,
@@ -90,15 +103,30 @@ impl StoreScreen {
             });
             match client.post_json(&url, &body).await {
                 Ok(resp) => {
-                    let items = resp.get("items").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
+                    let items = resp
+                        .get("items")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.as_slice())
+                        .unwrap_or(&[]);
                     let rows: Vec<Vec<String>> = items
                         .iter()
                         .map(|item| {
-                            let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let value = item.get("value").map(|v| {
-                                let s = v.to_string();
-                                if s.len() > 60 { format!("{}...", &s[..57]) } else { s }
-                            }).unwrap_or_else(|| "-".to_string());
+                            let key = item
+                                .get("key")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let value = item
+                                .get("value")
+                                .map(|v| {
+                                    let s = v.to_string();
+                                    if s.len() > 60 {
+                                        format!("{}...", &s[..57])
+                                    } else {
+                                        s
+                                    }
+                                })
+                                .unwrap_or_else(|| "-".to_string());
                             vec![key, value]
                         })
                         .collect();
@@ -146,7 +174,11 @@ impl StoreScreen {
 
         // Tab switches panes
         if key.code == KeyCode::Tab {
-            self.active_pane = if self.active_pane == Pane::Left { Pane::Right } else { Pane::Left };
+            self.active_pane = if self.active_pane == Pane::Left {
+                Pane::Right
+            } else {
+                Pane::Left
+            };
             return ScreenAction::None;
         }
 
@@ -179,7 +211,8 @@ impl StoreScreen {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).split(area);
+        let chunks = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area);
 
         // Highlight active pane with different border style
         self.namespace_table.render(frame, chunks[0]);

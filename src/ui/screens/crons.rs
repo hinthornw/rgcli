@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::api::Client;
@@ -21,12 +21,27 @@ pub struct CronsScreen {
 impl CronsScreen {
     pub fn new() -> Self {
         Self {
-            table: ResourceTable::new("Cron Jobs", vec![
-                Column { name: "ID".to_string(), width_pct: 25 },
-                Column { name: "Schedule".to_string(), width_pct: 25 },
-                Column { name: "Assistant".to_string(), width_pct: 25 },
-                Column { name: "Created".to_string(), width_pct: 25 },
-            ]),
+            table: ResourceTable::new(
+                "Cron Jobs",
+                vec![
+                    Column {
+                        name: "ID".to_string(),
+                        width_pct: 25,
+                    },
+                    Column {
+                        name: "Schedule".to_string(),
+                        width_pct: 25,
+                    },
+                    Column {
+                        name: "Assistant".to_string(),
+                        width_pct: 25,
+                    },
+                    Column {
+                        name: "Created".to_string(),
+                        width_pct: 25,
+                    },
+                ],
+            ),
             loaded: false,
             async_rx: None,
         }
@@ -50,9 +65,21 @@ impl CronsScreen {
                         .map(|c| {
                             let id = c.get("cron_id").and_then(|v| v.as_str()).unwrap_or("-");
                             let id_short: String = id.chars().take(12).collect();
-                            let schedule = c.get("schedule").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let assistant = c.get("assistant_id").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                            let created = c.get("created_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
+                            let schedule = c
+                                .get("schedule")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let assistant = c
+                                .get("assistant_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
+                            let created = c
+                                .get("created_at")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("-")
+                                .to_string();
                             vec![id_short, schedule, assistant, created]
                         })
                         .collect();

@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::api::Client;
@@ -23,11 +23,23 @@ pub struct ThreadsScreen {
 impl ThreadsScreen {
     pub fn new() -> Self {
         Self {
-            table: ResourceTable::new("Threads", vec![
-                Column { name: "ID".to_string(), width_pct: 25 },
-                Column { name: "Created".to_string(), width_pct: 35 },
-                Column { name: "Updated".to_string(), width_pct: 40 },
-            ]),
+            table: ResourceTable::new(
+                "Threads",
+                vec![
+                    Column {
+                        name: "ID".to_string(),
+                        width_pct: 25,
+                    },
+                    Column {
+                        name: "Created".to_string(),
+                        width_pct: 35,
+                    },
+                    Column {
+                        name: "Updated".to_string(),
+                        width_pct: 40,
+                    },
+                ],
+            ),
             loaded: false,
             async_rx: None,
             thread_ids: Vec::new(),
@@ -79,8 +91,17 @@ impl ThreadsScreen {
             while let Ok(result) = rx.try_recv() {
                 match result {
                     AsyncResult::Rows(rows) => {
-                        self.thread_ids = rows.iter().map(|r| r.get(3).cloned().unwrap_or_default()).collect();
-                        let display_rows: Vec<Vec<String>> = rows.into_iter().map(|mut r| { r.truncate(3); r }).collect();
+                        self.thread_ids = rows
+                            .iter()
+                            .map(|r| r.get(3).cloned().unwrap_or_default())
+                            .collect();
+                        let display_rows: Vec<Vec<String>> = rows
+                            .into_iter()
+                            .map(|mut r| {
+                                r.truncate(3);
+                                r
+                            })
+                            .collect();
                         self.table.set_rows(display_rows);
                         self.loaded = true;
                     }
@@ -141,8 +162,12 @@ impl ThreadsScreen {
                         tokio::spawn(async move {
                             let url = format!("{}/threads/{}", client.endpoint(), full_id);
                             match client.delete_url(&url).await {
-                                Ok(()) => { let _ = tx.send(AsyncResult::Deleted(full_id)); }
-                                Err(e) => { let _ = tx.send(AsyncResult::Error(e.to_string())); }
+                                Ok(()) => {
+                                    let _ = tx.send(AsyncResult::Deleted(full_id));
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(AsyncResult::Error(e.to_string()));
+                                }
                             }
                         });
                     }

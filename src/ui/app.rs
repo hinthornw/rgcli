@@ -14,11 +14,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use tokio::time;
 
-use crate::api::Client;
 use super::chat::{ChatExit, ChatState};
+use super::mascot::ParrotState;
 use super::screen::{Screen, ScreenAction, ScreenContext};
 use super::screens;
 use super::widgets::command_bar::{CommandBar, CommandBarResult};
+use crate::api::Client;
 
 pub struct TuiApp {
     screen: Screen,
@@ -40,11 +41,7 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-    pub fn new(
-        chat: ChatState,
-        client: Client,
-        thread_id: String,
-    ) -> Self {
+    pub fn new(chat: ChatState, client: Client, thread_id: String) -> Self {
         Self {
             screen: Screen::Chat,
             screen_stack: Vec::new(),
@@ -160,9 +157,9 @@ impl TuiApp {
 
         // Route to active screen
         let action = match &self.screen {
-            Screen::Chat => {
-                self.chat.handle_key_event(event, &self.client, &self.thread_id)
-            }
+            Screen::Chat => self
+                .chat
+                .handle_key_event(event, &self.client, &self.thread_id),
             Screen::Threads => self.threads.handle_key(key, &self.client),
             Screen::Assistants => self.assistants.handle_key(key, &self.client),
             Screen::Runs => self.runs.handle_key(key, &self.client),
@@ -225,6 +222,18 @@ impl TuiApp {
     }
 
     fn enter_screen(&mut self) {
+        // Update parrot state for the new screen
+        let parrot_state = match &self.screen {
+            Screen::Chat => ParrotState::Idle,
+            Screen::Threads => ParrotState::Threads,
+            Screen::Assistants => ParrotState::Assistants,
+            Screen::Runs => ParrotState::Runs,
+            Screen::Store => ParrotState::Store,
+            Screen::Crons => ParrotState::Crons,
+            Screen::Logs => ParrotState::Logs,
+        };
+        self.chat.parrot_mut().set_state(parrot_state);
+
         match &self.screen {
             Screen::Chat => {} // Chat is always alive
             Screen::Threads => self.threads.on_enter(&self.client),

@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table, TableState};
-use ratatui::Frame;
 
 pub struct Column {
     pub name: String,
@@ -188,8 +188,16 @@ impl ResourceTable {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         if self.loading {
             let msg = Paragraph::new("Loading...")
-                .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
-                .block(Block::default().borders(Borders::ALL).title(self.title.as_str()));
+                .style(
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(self.title.as_str()),
+                );
             frame.render_widget(msg, area);
             return;
         }
@@ -197,7 +205,11 @@ impl ResourceTable {
         if let Some(err) = &self.error {
             let msg = Paragraph::new(format!("Error: {err}"))
                 .style(Style::default().fg(Color::Red))
-                .block(Block::default().borders(Borders::ALL).title(self.title.as_str()));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(self.title.as_str()),
+                );
             frame.render_widget(msg, area);
             return;
         }
@@ -213,13 +225,24 @@ impl ResourceTable {
         if self.filtered_indices.is_empty() {
             let msg = Paragraph::new(self.empty_message.as_str())
                 .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::ALL).title(self.title.as_str()));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(self.title.as_str()),
+                );
             frame.render_widget(msg, table_area);
         } else {
             let header_cells: Vec<ratatui::text::Span> = self
                 .columns
                 .iter()
-                .map(|c| Span::styled(c.name.as_str(), Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)))
+                .map(|c| {
+                    Span::styled(
+                        c.name.as_str(),
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(Color::Cyan),
+                    )
+                })
                 .collect();
             let header = Row::new(header_cells).height(1);
 
@@ -261,7 +284,11 @@ impl ResourceTable {
 
             let table = Table::new(rows, &widths)
                 .header(header)
-                .block(Block::default().borders(Borders::ALL).title(self.title.as_str()))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(self.title.as_str()),
+                )
                 .row_highlight_style(
                     Style::default()
                         .add_modifier(Modifier::REVERSED)

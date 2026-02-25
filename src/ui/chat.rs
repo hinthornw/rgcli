@@ -15,6 +15,7 @@ use tui_textarea::{CursorMove, Input, Key, TextArea};
 
 use crate::api::types::Attachment;
 use crate::api::{Client, StreamEvent};
+use crate::ui::mascot::{Parrot, ParrotState};
 use crate::ui::styles;
 
 const CTRL_C_TIMEOUT: Duration = Duration::from_secs(1);
@@ -149,6 +150,9 @@ pub struct ChatState {
     search_mode: bool,
     search_query: String,
     search_matches: Vec<usize>,
+
+    // Mascot
+    parrot: Parrot,
 }
 
 #[derive(Default, Clone)]
@@ -204,6 +208,7 @@ impl ChatState {
             search_mode: false,
             search_query: String::new(),
             search_matches: Vec::new(),
+            parrot: Parrot::new(),
         }
     }
 
@@ -236,7 +241,8 @@ impl ChatState {
                 self.auto_scroll = true;
                 if self.is_streaming() {
                     self.pending_messages.push_back(msg);
-                    self.messages.push(ChatMessage::System("(queued)".to_string()));
+                    self.messages
+                        .push(ChatMessage::System("(queued)".to_string()));
                 } else if self.interrupted {
                     self.interrupted = false;
                     let input = if msg.trim().is_empty() {
@@ -256,7 +262,14 @@ impl ChatState {
                         self,
                     );
                 } else {
-                    start_run(client, thread_id, &self.assistant_id.clone(), &msg, None, self);
+                    start_run(
+                        client,
+                        thread_id,
+                        &self.assistant_id.clone(),
+                        &msg,
+                        None,
+                        self,
+                    );
                 }
                 reset_textarea(self);
                 ScreenAction::None
@@ -268,7 +281,8 @@ impl ChatState {
                     tokio::spawn(async move {
                         let _ = client.cancel_run(&tid, &run_id).await;
                     });
-                    self.messages.push(ChatMessage::System("(cancelling...)".to_string()));
+                    self.messages
+                        .push(ChatMessage::System("(cancelling...)".to_string()));
                 }
                 ScreenAction::None
             }
@@ -300,9 +314,8 @@ impl ChatState {
             }
             Action::SwitchAssistant(id) => {
                 self.assistant_id = id.clone();
-                self.messages.push(ChatMessage::System(
-                    format!("Switched to assistant: {id}"),
-                ));
+                self.messages
+                    .push(ChatMessage::System(format!("Switched to assistant: {id}")));
                 reset_textarea(self);
                 ScreenAction::None
             }
@@ -313,9 +326,8 @@ impl ChatState {
             }
             Action::Mode(mode) => {
                 self.stream_mode = mode.clone();
-                self.messages.push(ChatMessage::System(
-                    format!("Stream mode set to: {mode}"),
-                ));
+                self.messages
+                    .push(ChatMessage::System(format!("Stream mode set to: {mode}")));
                 reset_textarea(self);
                 ScreenAction::None
             }
@@ -328,6 +340,15 @@ impl ChatState {
         if self.is_streaming() {
             self.spinner_idx += 1;
         }
+        // Update parrot state based on chat state
+        if self.is_waiting || self.is_streaming() {
+            self.parrot.set_state(ParrotState::Thinking);
+        } else if !collect_input(&self.textarea).is_empty() {
+            self.parrot.set_state(ParrotState::Typing);
+        } else {
+            self.parrot.set_state(ParrotState::Idle);
+        }
+        self.parrot.tick();
     }
 
     pub async fn handle_stream_event(&mut self, client: &Client, thread_id: &str) {
@@ -378,6 +399,10 @@ impl ChatState {
 
     pub fn has_pending_stream(&self) -> bool {
         self.stream_rx.is_some()
+    }
+
+    pub fn parrot_mut(&mut self) -> &mut Parrot {
+        &mut self.parrot
     }
 
     #[allow(dead_code)]
@@ -1080,7 +1105,12 @@ async fn recv_stream(rx: &mut Option<mpsc::UnboundedReceiver<StreamEvent>>) -> O
     }
 }
 
-async fn handle_stream_event(app: &mut ChatState, event: StreamEvent, client: &Client, thread_id: &str) {
+async fn handle_stream_event(
+    app: &mut ChatState,
+    event: StreamEvent,
+    client: &Client,
+    thread_id: &str,
+) {
     match event {
         StreamEvent::RunStarted(id) => {
             app.active_run_id = Some(id.clone());

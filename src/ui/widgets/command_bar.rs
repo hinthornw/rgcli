@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::ui::screen::Screen;
 
@@ -76,19 +76,27 @@ impl CommandBar {
             .unwrap_or_default();
 
         let line = Line::from(vec![
-            Span::styled(":", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                ":",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(&self.input),
             if !hint.is_empty() && hint.to_lowercase() != self.input.to_lowercase() {
                 Span::styled(
                     format!("  -> {hint}"),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 )
             } else {
                 Span::raw("")
             },
         ]);
 
-        let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 30)).fg(Color::White));
+        let bar = Paragraph::new(line)
+            .style(Style::default().bg(Color::Rgb(30, 30, 30)).fg(Color::White));
         frame.render_widget(bar, area);
     }
 }

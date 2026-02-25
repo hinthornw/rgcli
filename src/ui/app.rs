@@ -298,10 +298,7 @@ impl TuiApp {
             spans.push(Span::raw("  "));
         }
         // Right-align a Ctrl+B hint
-        let hint = Span::styled(
-            "^B navigate ",
-            Style::default().fg(Color::Rgb(80, 80, 80)),
-        );
+        let hint = Span::styled("^B navigate ", Style::default().fg(Color::Rgb(80, 80, 80)));
         let tabs_width: usize = spans.iter().map(|s| s.content.len()).sum();
         let hint_width = hint.content.len();
         let padding = area.width as usize - tabs_width.min(area.width as usize) - hint_width;

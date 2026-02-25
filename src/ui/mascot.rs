@@ -1,29 +1,23 @@
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-// Parrot color palette
-const GREEN_BRIGHT: Color = Color::Rgb(34, 180, 34);
-const GREEN_DARK: Color = Color::Rgb(20, 120, 20);
-const BELLY: Color = Color::Rgb(180, 220, 40);
-const BEAK: Color = Color::Rgb(255, 165, 0);
-const EYE_WHITE: Color = Color::Rgb(240, 240, 240);
-const EYE_PUPIL: Color = Color::Rgb(20, 20, 20);
-const CREST: Color = Color::Rgb(220, 50, 50);
-const WING_BLUE: Color = Color::Rgb(40, 100, 200);
-const FEET: Color = Color::Rgb(100, 100, 100);
+// Kawaii parrot palette — soft, rounded feel
+const GREEN: Color = Color::Rgb(100, 210, 120);
+const GREEN_LT: Color = Color::Rgb(150, 230, 160);
+const BELLY: Color = Color::Rgb(255, 250, 220);
+const BEAK: Color = Color::Rgb(255, 180, 80);
+const BLUSH: Color = Color::Rgb(255, 150, 150);
+const EYE_BG: Color = Color::Rgb(40, 40, 60);
+const EYE_SHINE: Color = Color::Rgb(255, 255, 255);
+const CREST: Color = Color::Rgb(255, 120, 100);
+const WING: Color = Color::Rgb(80, 180, 220);
+const FEET: Color = Color::Rgb(255, 180, 80);
 const BG: Color = Color::Reset;
 
-/// Half-block helper: top color = bg, bottom color = fg when using '▄'
-fn hb(top: Color, bottom: Color) -> Style {
-    Style::default().fg(bottom).bg(top)
+fn s(fg_c: Color, bg_c: Color) -> Style {
+    Style::default().fg(fg_c).bg(bg_c)
 }
 
-/// Solid block of one color
-fn solid(c: Color) -> Style {
-    Style::default().fg(c).bg(c)
-}
-
-/// Foreground-only style
 fn fg(c: Color) -> Style {
     Style::default().fg(c)
 }
@@ -69,7 +63,7 @@ impl Parrot {
         let speed = match self.state {
             ParrotState::Thinking => 4,
             ParrotState::Idle => 20,
-            ParrotState::Runs => 6,
+            ParrotState::Runs => 5,
             _ => 10,
         };
         if self.tick % speed == 0 {
@@ -77,54 +71,52 @@ impl Parrot {
         }
     }
 
-    /// Returns the parrot as colored Lines, ready to render
     pub fn render(&self) -> Vec<Line<'static>> {
         match self.state {
             ParrotState::Idle => self.render_idle(),
             ParrotState::Typing => self.render_typing(),
             ParrotState::Thinking => self.render_thinking(),
-            ParrotState::Threads => self.render_threads(),
-            ParrotState::Assistants => self.render_assistants(),
+            ParrotState::Threads => self.render_screen("~"),
+            ParrotState::Assistants => self.render_screen("*"),
             ParrotState::Runs => self.render_runs(),
-            ParrotState::Store => self.render_store(),
-            ParrotState::Crons => self.render_crons(),
-            ParrotState::Logs => self.render_logs(),
+            ParrotState::Store => self.render_thinking(),
+            ParrotState::Crons => self.render_screen("@"),
+            ParrotState::Logs => self.render_screen("#"),
         }
     }
 
     fn render_idle(&self) -> Vec<Line<'static>> {
-        let blink = self.frame % 12 == 0;
-        let look_down = self.frame % 12 == 6;
+        let blink = self.frame % 15 == 0;
         if blink {
-            parrot_base(EyeStyle::Blink, false)
-        } else if look_down {
-            parrot_base(EyeStyle::Down, false)
+            kawaii_parrot(Eyes::Happy)
         } else {
-            parrot_base(EyeStyle::Forward, false)
+            kawaii_parrot(Eyes::Normal)
         }
     }
 
     fn render_typing(&self) -> Vec<Line<'static>> {
-        let look_right = self.frame % 2 == 0;
-        if look_right {
-            parrot_base(EyeStyle::DownRight, false)
+        if self.frame % 2 == 0 {
+            kawaii_parrot(Eyes::LookRight)
         } else {
-            parrot_base(EyeStyle::DownLeft, false)
+            kawaii_parrot(Eyes::LookLeft)
         }
     }
 
     fn render_thinking(&self) -> Vec<Line<'static>> {
+        let eyes = if self.frame % 4 == 3 {
+            Eyes::Happy
+        } else {
+            Eyes::Sparkle
+        };
         let dots = match self.frame % 4 {
             0 => " .",
             1 => " ..",
             2 => " ...",
             _ => "",
         };
-        let tilted = self.frame % 4 != 3;
-        let mut lines = parrot_base(if tilted { EyeStyle::Up } else { EyeStyle::Forward }, tilted);
-        // Add thinking dots to the right of the top line
+        let mut lines = kawaii_parrot(eyes);
         if !dots.is_empty() {
-            if let Some(line) = lines.get_mut(2) {
+            if let Some(line) = lines.get_mut(1) {
                 line.spans.push(Span::styled(
                     dots.to_string(),
                     Style::default().fg(Color::Rgb(200, 200, 200)),
@@ -134,367 +126,126 @@ impl Parrot {
         lines
     }
 
-    fn render_threads(&self) -> Vec<Line<'static>> {
-        // Parrot with a tiny scroll
-        let mut lines = parrot_base(EyeStyle::Forward, false);
-        if let Some(line) = lines.get_mut(5) {
-            line.spans.push(Span::styled(" 📜", fg(Color::White)));
-        }
-        lines
-    }
-
-    fn render_assistants(&self) -> Vec<Line<'static>> {
-        // Parrot with glasses
-        parrot_with_glasses()
-    }
-
     fn render_runs(&self) -> Vec<Line<'static>> {
-        // Flapping wings animation
-        let flap = self.frame % 2 == 0;
-        parrot_flapping(flap)
+        // Alternate between normal and happy — bouncy energy
+        if self.frame % 2 == 0 {
+            kawaii_parrot(Eyes::Sparkle)
+        } else {
+            kawaii_parrot(Eyes::Happy)
+        }
     }
 
-    fn render_store(&self) -> Vec<Line<'static>> {
-        let mut lines = parrot_base(EyeStyle::Up, false);
-        // Thought bubble above
-        if let Some(line) = lines.first_mut() {
-            line.spans
-                .insert(0, Span::styled("  o ", fg(Color::Rgb(180, 180, 180))));
-        }
-        lines.insert(
-            0,
-            Line::from(Span::styled(
-                "     ( ? )",
-                fg(Color::Rgb(180, 180, 180)),
-            )),
-        );
-        lines
-    }
-
-    fn render_crons(&self) -> Vec<Line<'static>> {
-        let mut lines = parrot_base(EyeStyle::Forward, false);
-        if let Some(line) = lines.get_mut(1) {
-            line.spans
-                .push(Span::styled(" \u{23f0}", fg(Color::White)));
-        }
-        lines
-    }
-
-    fn render_logs(&self) -> Vec<Line<'static>> {
-        let mut lines = parrot_base(EyeStyle::Forward, false);
-        if let Some(line) = lines.get_mut(3) {
-            line.spans
-                .push(Span::styled(" \u{1f50d}", fg(Color::White)));
-        }
-        lines
+    fn render_screen(&self, _marker: &str) -> Vec<Line<'static>> {
+        kawaii_parrot(Eyes::Normal)
     }
 }
 
 #[derive(Clone, Copy)]
-enum EyeStyle {
-    Forward,
-    Blink,
-    Down,
-    DownLeft,
-    DownRight,
-    Up,
+enum Eyes {
+    Normal,  // big round eyes with shine
+    Happy,   // ^_^ squint
+    Sparkle, // star eyes
+    LookLeft,
+    LookRight,
 }
 
-/// Main parrot sprite (~10 lines tall, ~14 chars wide)
-/// Uses half-block trick: '▄' shows bg on top, fg on bottom
-fn parrot_base(eyes: EyeStyle, _tilted: bool) -> Vec<Line<'static>> {
-    // Line 0: crest tips
-    //       ▄▄▓▓▄▄
-    let line0 = Line::from(vec![
-        Span::styled("      ", Style::default()),
-        Span::styled("▄▄", hb(BG, CREST)),
-        Span::styled("▄▄", hb(BG, CREST)),
-    ]);
+/// Kawaii parrot — 8 lines tall, round and soft
+///
+/// Design (conceptual):
+///    ╭──╮        <- crest tuft
+///   ╭(●ω●)╮     <- round head, big eyes, tiny beak
+///   │ >//< │     <- blush cheeks
+///   ╰┬────┬╯     <- round body
+///    ╰┘  ╰┘     <- tiny feet
+///
+/// Using half-blocks and unicode for soft round shapes.
+fn kawaii_parrot(eyes: Eyes) -> Vec<Line<'static>> {
+    // Line 0: little crest tuft
+    let line0 = Line::from(vec![Span::raw("    "), Span::styled("▄▄", s(CREST, BG))]);
 
-    // Line 1: crest + head top
-    //     ▄▓████▓▄
+    // Line 1: top of head — round
     let line1 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▄", hb(BG, CREST)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("████", solid(GREEN_BRIGHT)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("▄", hb(BG, CREST)),
+        Span::raw("  "),
+        Span::styled("▄", s(GREEN, BG)),
+        Span::styled("▄▄▄▄", s(GREEN_LT, BG)),
+        Span::styled("▄", s(GREEN, BG)),
     ]);
 
     // Line 2: eyes row
-    let (left_eye, right_eye) = match eyes {
-        EyeStyle::Forward => ("◉", "◉"),
-        EyeStyle::Blink => ("─", "─"),
-        EyeStyle::Down => ("◒", "◒"),
-        EyeStyle::DownLeft => ("◐", "◑"),
-        EyeStyle::DownRight => ("◑", "◐"),
-        EyeStyle::Up => ("◓", "◓"),
+    let (le, re) = match eyes {
+        Eyes::Normal => (
+            Span::styled("●", s(EYE_SHINE, EYE_BG)),
+            Span::styled("●", s(EYE_SHINE, EYE_BG)),
+        ),
+        Eyes::Happy => (
+            Span::styled("^", s(EYE_BG, GREEN_LT)),
+            Span::styled("^", s(EYE_BG, GREEN_LT)),
+        ),
+        Eyes::Sparkle => (
+            Span::styled("*", s(Color::Rgb(255, 220, 100), EYE_BG)),
+            Span::styled("*", s(Color::Rgb(255, 220, 100), EYE_BG)),
+        ),
+        Eyes::LookLeft => (
+            Span::styled("◐", s(EYE_SHINE, EYE_BG)),
+            Span::styled("◐", s(EYE_SHINE, EYE_BG)),
+        ),
+        Eyes::LookRight => (
+            Span::styled("◑", s(EYE_SHINE, EYE_BG)),
+            Span::styled("◑", s(EYE_SHINE, EYE_BG)),
+        ),
     };
     let line2 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled(left_eye, Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled(right_eye, Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
+        Span::raw(" "),
+        Span::styled("▐", fg(GREEN)),
+        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        le,
+        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        re,
+        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        Span::styled("▌", fg(GREEN)),
     ]);
 
-    // Line 3: cheeks
+    // Line 3: beak + blush
     let line3 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▄▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
+        Span::raw(" "),
+        Span::styled("▐", fg(GREEN)),
+        Span::styled(".", s(BLUSH, GREEN_LT)),
+        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        Span::styled("▾", s(BEAK, GREEN_LT)),
+        Span::styled(" ", s(GREEN_LT, GREEN_LT)),
+        Span::styled(".", s(BLUSH, GREEN_LT)),
+        Span::styled("▌", fg(GREEN)),
     ]);
 
-    // Line 4: beak
+    // Line 4: body top with tiny wings
     let line4 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("▀▀", Style::default().fg(BEAK).bg(BEAK)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
+        Span::styled("~", fg(WING)),
+        Span::styled("▐", fg(GREEN)),
+        Span::styled("▄▄▄▄▄▄", s(BELLY, GREEN_LT)),
+        Span::styled("▌", fg(GREEN)),
+        Span::styled("~", fg(WING)),
     ]);
 
-    // Line 5: upper body
+    // Line 5: round belly
     let line5 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("██████", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(WING_BLUE)),
+        Span::raw(" "),
+        Span::styled("▐", fg(GREEN)),
+        Span::styled("      ", s(BELLY, BELLY)),
+        Span::styled("▌", fg(GREEN)),
     ]);
 
-    // Line 6: belly
-    let line6 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▓▓▓▓", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
+    // Line 6: bottom
+    let line6 = Line::from(vec![Span::raw("  "), Span::styled("▀▀▀▀▀▀", s(GREEN, BG))]);
 
-    // Line 7: lower body
+    // Line 7: tiny feet
     let line7 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("░░░░", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
+        Span::raw("   "),
+        Span::styled("▀▘", fg(FEET)),
+        Span::raw("  "),
+        Span::styled("▀▘", fg(FEET)),
     ]);
 
-    // Line 8: tail base
-    let line8 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▀█", hb(BG, GREEN_DARK)),
-        Span::styled("▄▄", hb(GREEN_DARK, FEET)),
-        Span::styled("█▀", hb(BG, GREEN_DARK)),
-    ]);
-
-    // Line 9: feet
-    let line9 = Line::from(vec![
-        Span::styled("     ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-        Span::styled(" ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-    ]);
-
-    vec![line0, line1, line2, line3, line4, line5, line6, line7, line8, line9]
-}
-
-/// Parrot wearing tiny glasses (assistants screen)
-fn parrot_with_glasses() -> Vec<Line<'static>> {
-    let line0 = Line::from(vec![
-        Span::styled("      ", Style::default()),
-        Span::styled("▄▄", hb(BG, CREST)),
-        Span::styled("▄▄", hb(BG, CREST)),
-    ]);
-
-    let line1 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▄", hb(BG, CREST)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("████", solid(GREEN_BRIGHT)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("▄", hb(BG, CREST)),
-    ]);
-
-    // Glasses: [◉]─[◉]
-    let line2 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("[", Style::default().fg(Color::Rgb(180, 180, 180)).bg(GREEN_BRIGHT)),
-        Span::styled("◉", Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("]", Style::default().fg(Color::Rgb(180, 180, 180)).bg(GREEN_BRIGHT)),
-        Span::styled("─", Style::default().fg(Color::Rgb(180, 180, 180)).bg(GREEN_BRIGHT)),
-        Span::styled("[", Style::default().fg(Color::Rgb(180, 180, 180)).bg(GREEN_BRIGHT)),
-        Span::styled("◉", Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("]", Style::default().fg(Color::Rgb(180, 180, 180)).bg(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
-    ]);
-
-    let line3 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▄▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
-    ]);
-
-    let line4 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("▀▀", Style::default().fg(BEAK).bg(BEAK)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-    ]);
-
-    let line5 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("██████", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
-
-    let line6 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▓▓▓▓", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
-
-    let line7 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("░░░░", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
-
-    let line8 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▀█", hb(BG, GREEN_DARK)),
-        Span::styled("▄▄", hb(GREEN_DARK, FEET)),
-        Span::styled("█▀", hb(BG, GREEN_DARK)),
-    ]);
-
-    let line9 = Line::from(vec![
-        Span::styled("     ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-        Span::styled(" ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-    ]);
-
-    vec![line0, line1, line2, line3, line4, line5, line6, line7, line8, line9]
-}
-
-/// Parrot with flapping wings (runs screen)
-fn parrot_flapping(wings_up: bool) -> Vec<Line<'static>> {
-    let line0 = Line::from(vec![
-        Span::styled("      ", Style::default()),
-        Span::styled("▄▄", hb(BG, CREST)),
-        Span::styled("▄▄", hb(BG, CREST)),
-    ]);
-
-    let line1 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▄", hb(BG, CREST)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("████", solid(GREEN_BRIGHT)),
-        Span::styled("▓", fg(CREST)),
-        Span::styled("▄", hb(BG, CREST)),
-    ]);
-
-    let line2 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("◉", Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("◉", Style::default().fg(EYE_PUPIL).bg(EYE_WHITE)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
-    ]);
-
-    let line3 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(GREEN_DARK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▄▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("██", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(GREEN_DARK)),
-    ]);
-
-    let line4 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("▀▀", Style::default().fg(BEAK).bg(BEAK)),
-        Span::styled("▄", hb(GREEN_BRIGHT, BEAK)),
-        Span::styled("█", solid(GREEN_BRIGHT)),
-    ]);
-
-    // Wings up or down
-    let (wing_l, wing_r) = if wings_up {
-        ("╱", "╲")
-    } else {
-        ("╲", "╱")
-    };
-
-    let line5 = Line::from(vec![
-        Span::styled("  ", Style::default()),
-        Span::styled(wing_l, fg(WING_BLUE)),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("██████", solid(GREEN_BRIGHT)),
-        Span::styled("▌", fg(WING_BLUE)),
-        Span::styled(wing_r, fg(WING_BLUE)),
-    ]);
-
-    let line6 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▓▓▓▓", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
-
-    let line7 = Line::from(vec![
-        Span::styled("   ", Style::default()),
-        Span::styled("▐", fg(WING_BLUE)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("░░░░", Style::default().fg(BELLY).bg(GREEN_DARK)),
-        Span::styled("█", solid(GREEN_DARK)),
-        Span::styled("▌", fg(WING_BLUE)),
-    ]);
-
-    let line8 = Line::from(vec![
-        Span::styled("    ", Style::default()),
-        Span::styled("▀█", hb(BG, GREEN_DARK)),
-        Span::styled("▄▄", hb(GREEN_DARK, FEET)),
-        Span::styled("█▀", hb(BG, GREEN_DARK)),
-    ]);
-
-    let line9 = Line::from(vec![
-        Span::styled("     ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-        Span::styled(" ", Style::default()),
-        Span::styled("▐▌", fg(FEET)),
-    ]);
-
-    vec![line0, line1, line2, line3, line4, line5, line6, line7, line8, line9]
+    vec![line0, line1, line2, line3, line4, line5, line6, line7]
 }
 
 /// Render the parrot for the welcome/logo area, with info text beside it
@@ -505,38 +256,28 @@ pub fn logo_with_parrot(
     context_info: &str,
     deploy_info: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let parrot_lines = parrot_base(EyeStyle::Forward, false);
+    let parrot_lines = kawaii_parrot(Eyes::Normal);
 
     let title_style = Style::default()
         .fg(Color::Cyan)
-        .add_modifier(ratatui::style::Modifier::BOLD);
+        .add_modifier(Modifier::BOLD);
     let info_style = Style::default()
         .fg(Color::DarkGray)
-        .add_modifier(ratatui::style::Modifier::ITALIC);
+        .add_modifier(Modifier::ITALIC);
 
     let info_texts: Vec<Option<Vec<Span<'static>>>> = vec![
-        None, // line 0: no text
-        None, // line 1: no text
+        None,
         Some(vec![
             Span::styled("   ailsd", title_style),
             Span::raw(" "),
             Span::styled(version.to_string(), info_style),
         ]),
-        Some(vec![
-            Span::styled(format!("   {endpoint}"), info_style),
-        ]),
-        Some(vec![
-            Span::styled(format!("   {context_info}"), info_style),
-        ]),
-        Some(vec![
-            Span::styled(format!("   {config_path}"), info_style),
-        ]),
-        deploy_info.map(|info| vec![
-            Span::styled(format!("   {info}"), info_style),
-        ]),
-        None, // line 7
-        None, // line 8
-        None, // line 9
+        Some(vec![Span::styled(format!("   {endpoint}"), info_style)]),
+        Some(vec![Span::styled(format!("   {context_info}"), info_style)]),
+        Some(vec![Span::styled(format!("   {config_path}"), info_style)]),
+        deploy_info.map(|info| vec![Span::styled(format!("   {info}"), info_style)]),
+        None,
+        None,
     ];
 
     let mut result = Vec::new();

@@ -160,6 +160,14 @@ pub struct ChatState {
     parrot: Parrot,
 }
 
+#[derive(Clone)]
+pub(crate) struct ToolExec {
+    name: String,
+    started_at: Instant,
+    completed_at: Option<Instant>,
+    duration_ms: Option<u128>,
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct RunMetrics {
     run_started_at: Option<Instant>,
@@ -173,6 +181,13 @@ pub(crate) struct RunMetrics {
     last_total_ms: Option<u128>,
     last_token_count: Option<usize>,
     last_run_id: Option<String>,
+    // Tool timeline
+    tool_timeline: Vec<ToolExec>,
+    last_tool_timeline: Vec<ToolExec>,
+    // Graph node tracking
+    current_node: Option<String>,
+    node_history: Vec<String>,
+    last_node_history: Vec<String>,
 }
 
 impl ChatState {
@@ -377,10 +392,11 @@ impl ChatState {
         let status_height = if self.search_mode { 2 } else { 1 };
 
         if self.devtools {
+            let devtools_height = 3;
             let chunks = Layout::vertical([
                 Constraint::Min(3),
                 Constraint::Length(input_height),
-                Constraint::Length(1),
+                Constraint::Length(devtools_height),
                 Constraint::Length(status_height),
             ])
             .split(area);
@@ -954,36 +970,40 @@ fn render_input(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
 }
 
 fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
-    let mut parts: Vec<Span> = vec![Span::styled(" devtools ", styles::user_style())];
+    let bg = Style::new().fg(Color::White).bg(Color::Rgb(40, 40, 40));
+    let dim = Style::new().fg(Color::DarkGray).bg(Color::Rgb(40, 40, 40));
+
+    // Line 1: Metrics
+    let mut line1: Vec<Span> = vec![Span::styled(" devtools ", styles::user_style())];
 
     if app.is_streaming() || app.is_waiting {
         if let Some(started) = app.metrics.run_started_at {
             let elapsed = started.elapsed().as_millis();
             if let Some(first) = app.metrics.first_token_at {
                 let ttft = first.duration_since(started).as_millis();
-                parts.push(Span::raw(format!("TTFT: {}ms ", ttft)));
+                line1.push(Span::raw(format!("TTFT: {}ms ", ttft)));
                 let stream_dur = first.elapsed().as_secs_f64();
                 if stream_dur > 0.0 && app.metrics.token_count > 1 {
                     let tps = (app.metrics.token_count - 1) as f64 / stream_dur;
-                    parts.push(Span::raw(format!("{:.0} tok/s ", tps)));
+                    line1.push(Span::raw(format!("{:.0} tok/s ", tps)));
                 }
-                parts.push(Span::raw(format!("tokens: {} ", app.metrics.token_count)));
+                line1.push(Span::raw(format!("tokens: {} ", app.metrics.token_count)));
             } else {
-                parts.push(Span::raw(format!("waiting: {}ms ", elapsed)));
+                line1.push(Span::raw(format!("waiting: {}ms ", elapsed)));
             }
         }
     } else if app.metrics.last_total_ms.is_some() {
         if let Some(ttft) = app.metrics.last_ttft_ms {
-            parts.push(Span::raw(format!("TTFT: {}ms ", ttft)));
+            line1.push(Span::raw(format!("TTFT: {}ms ", ttft)));
         }
         if let Some(tps) = app.metrics.last_tokens_per_sec {
-            parts.push(Span::raw(format!("{:.0} tok/s ", tps)));
+            line1.push(Span::raw(format!("{:.0} tok/s ", tps)));
         }
         if let Some(total) = app.metrics.last_total_ms {
-            parts.push(Span::raw(format!("total: {}ms ", total)));
+            line1.push(Span::raw(format!("total: {}ms ", total)));
         }
         if let Some(count) = app.metrics.last_token_count {
-            parts.push(Span::raw(format!("tokens: {} ", count)));
+            line1.push(Span::raw(format!("tokens: {} ", count)));
         }
     }
 
@@ -994,14 +1014,82 @@ fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
         .or(app.metrics.last_run_id.as_deref())
     {
         let short = if rid.len() > 8 { &rid[..8] } else { rid };
-        parts.push(Span::styled(
+        line1.push(Span::styled(
             format!("run:{short}"),
             styles::system_style_r(),
         ));
     }
 
-    let line = Line::from(parts);
-    let bar = Paragraph::new(line).style(Style::new().fg(Color::White).bg(Color::Rgb(40, 40, 40)));
+    // Line 2: Tool timeline
+    let timeline = if app.is_streaming() || app.is_waiting {
+        &app.metrics.tool_timeline
+    } else {
+        &app.metrics.last_tool_timeline
+    };
+    let mut line2: Vec<Span> = vec![Span::styled(" tools ", dim)];
+    if timeline.is_empty() {
+        line2.push(Span::styled("none", dim));
+    } else {
+        for (i, tool) in timeline.iter().enumerate() {
+            if i > 0 {
+                line2.push(Span::styled(" > ", dim));
+            }
+            let name_style = Style::new().fg(Color::Cyan).bg(Color::Rgb(40, 40, 40));
+            if let Some(ms) = tool.duration_ms {
+                line2.push(Span::styled(tool.name.to_string(), name_style));
+                line2.push(Span::styled(
+                    format!(" {}ms", ms),
+                    Style::new().fg(Color::Green).bg(Color::Rgb(40, 40, 40)),
+                ));
+            } else {
+                line2.push(Span::styled(format!("{}...", tool.name), name_style));
+            }
+        }
+    }
+
+    // Line 3: Node + trace link
+    let node_history = if app.is_streaming() || app.is_waiting {
+        &app.metrics.node_history
+    } else {
+        &app.metrics.last_node_history
+    };
+    let mut line3: Vec<Span> = Vec::new();
+    if !node_history.is_empty() {
+        line3.push(Span::styled(" nodes ", dim));
+        line3.push(Span::styled(
+            node_history.join(" > "),
+            Style::new().fg(Color::Magenta).bg(Color::Rgb(40, 40, 40)),
+        ));
+        line3.push(Span::raw("  "));
+    } else {
+        line3.push(Span::styled(" ", dim));
+    }
+    // Trace link
+    if let Some(rid) = app
+        .metrics
+        .run_id
+        .as_deref()
+        .or(app.metrics.last_run_id.as_deref())
+    {
+        if let Some(tid) = &app.tenant_id {
+            let url = if let Some(pid) = &app.project_id {
+                format!("https://smith.langchain.com/o/{tid}/projects/p/{pid}/r/{rid}")
+            } else {
+                format!("https://smith.langchain.com/o/{tid}/r/{rid}")
+            };
+            line3.push(Span::styled(
+                format!("trace: {url}"),
+                Style::new().fg(Color::Blue).bg(Color::Rgb(40, 40, 40)),
+            ));
+        }
+    }
+
+    let text = ratatui::text::Text::from(vec![
+        Line::from(line1),
+        Line::from(line2),
+        Line::from(line3),
+    ]);
+    let bar = Paragraph::new(text).style(bg);
     frame.render_widget(bar, area);
 }
 
@@ -1064,6 +1152,22 @@ fn render_status_bar(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
     if !app.pending_messages.is_empty() {
         let n = app.pending_messages.len();
         left_parts.push(Span::raw(format!(" | {} queued", n)));
+    }
+
+    // Show trace link (short run ID) when not in devtools mode
+    if !app.devtools {
+        if let Some(rid) = app
+            .metrics
+            .last_run_id
+            .as_deref()
+            .or(app.metrics.run_id.as_deref())
+        {
+            let short = if rid.len() > 8 { &rid[..8] } else { rid };
+            left_parts.push(Span::styled(
+                format!(" | trace:{short}"),
+                Style::new().fg(Color::Blue),
+            ));
+        }
     }
 
     let right = if let Some(notice) = &app.update_notice {
@@ -1145,11 +1249,30 @@ async fn handle_stream_event(
                 let text = std::mem::take(&mut app.streaming_text);
                 app.messages.push(ChatMessage::Assistant(text));
             }
+            // Track tool execution start
+            app.metrics.tool_timeline.push(ToolExec {
+                name: name.clone(),
+                started_at: Instant::now(),
+                completed_at: None,
+                duration_ms: None,
+            });
             app.messages.push(ChatMessage::ToolUse(name, args));
             app.is_waiting = false;
             app.auto_scroll = true;
         }
         StreamEvent::ToolResult(name, content) => {
+            // Complete tool execution timing
+            let now = Instant::now();
+            if let Some(tool) = app
+                .metrics
+                .tool_timeline
+                .iter_mut()
+                .rev()
+                .find(|t| t.name == name && t.completed_at.is_none())
+            {
+                tool.completed_at = Some(now);
+                tool.duration_ms = Some(now.duration_since(tool.started_at).as_millis());
+            }
             app.messages.push(ChatMessage::ToolResult(name, content));
             app.auto_scroll = true;
         }
@@ -1185,6 +1308,10 @@ async fn handle_stream_event(
                     }
                 }
             }
+            // Snapshot tool timeline and node history
+            app.metrics.last_tool_timeline = std::mem::take(&mut app.metrics.tool_timeline);
+            app.metrics.last_node_history = std::mem::take(&mut app.metrics.node_history);
+            app.metrics.current_node = None;
 
             // Trace link (devtools only)
             if app.devtools {
@@ -1252,6 +1379,9 @@ fn start_run(
     app.metrics.token_count = 0;
     app.metrics.total_chars = 0;
     app.metrics.run_id = None;
+    app.metrics.tool_timeline.clear();
+    app.metrics.node_history.clear();
+    app.metrics.current_node = None;
 
     let client = client.clone();
     let thread_id = thread_id.to_string();
@@ -1294,6 +1424,9 @@ fn start_run_with_attachments(
     app.metrics.token_count = 0;
     app.metrics.total_chars = 0;
     app.metrics.run_id = None;
+    app.metrics.tool_timeline.clear();
+    app.metrics.node_history.clear();
+    app.metrics.current_node = None;
 
     let client = client.clone();
     let thread_id = thread_id.to_string();

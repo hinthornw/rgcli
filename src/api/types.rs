@@ -83,7 +83,9 @@ pub fn new_run_request(
     assistant_id: &str,
     user_message: &str,
     multitask_strategy: Option<&str>,
+    stream_mode: Option<&str>,
 ) -> RunRequest {
+    let mode = stream_mode.unwrap_or("messages-tuple");
     RunRequest {
         assistant_id: assistant_id.to_string(),
         input: serde_json::json!({
@@ -94,7 +96,7 @@ pub fn new_run_request(
                 }
             ]
         }),
-        stream_mode: vec!["messages-tuple".to_string()],
+        stream_mode: vec![mode.to_string()],
         if_not_exists: Some("create".to_string()),
         multitask_strategy: multitask_strategy.map(String::from),
     }
@@ -106,7 +108,9 @@ pub fn new_run_request_with_attachments(
     user_message: &str,
     attachments: &[Attachment],
     multitask_strategy: Option<&str>,
+    stream_mode: Option<&str>,
 ) -> RunRequest {
+    let mode = stream_mode.unwrap_or("messages-tuple");
     let mut content_parts = Vec::new();
     content_parts.push(serde_json::json!({"type": "text", "text": user_message}));
     for att in attachments {
@@ -126,18 +130,19 @@ pub fn new_run_request_with_attachments(
                 }
             ]
         }),
-        stream_mode: vec!["messages-tuple".to_string()],
+        stream_mode: vec![mode.to_string()],
         if_not_exists: Some("create".to_string()),
         multitask_strategy: multitask_strategy.map(String::from),
     }
 }
 
 /// Create a resume request (no new user message, continues interrupted graph).
-pub fn new_resume_request(assistant_id: &str, input: Option<Value>) -> RunRequest {
+pub fn new_resume_request(assistant_id: &str, input: Option<Value>, stream_mode: Option<&str>) -> RunRequest {
+    let mode = stream_mode.unwrap_or("messages-tuple");
     RunRequest {
         assistant_id: assistant_id.to_string(),
         input: input.unwrap_or(Value::Null),
-        stream_mode: vec!["messages-tuple".to_string()],
+        stream_mode: vec![mode.to_string()],
         if_not_exists: None,
         multitask_strategy: None,
     }

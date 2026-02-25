@@ -68,3 +68,29 @@ pub async fn history(client: &Client, thread_id: &str, limit: usize) -> Result<(
     println!("{}", serde_json::to_string_pretty(&resp)?);
     Ok(())
 }
+
+pub async fn copy(client: &Client, thread_id: &str) -> Result<()> {
+    let url = format!(
+        "{}/threads/{}/copy",
+        client.endpoint(),
+        thread_id
+    );
+    let resp = client.post_json(&url, &serde_json::json!({})).await?;
+    if let Some(new_id) = resp.get("thread_id").and_then(|v| v.as_str()) {
+        println!("Copied thread to: {}", new_id);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    }
+    Ok(())
+}
+
+pub async fn prune(client: &Client, thread_id: &str) -> Result<()> {
+    let url = format!(
+        "{}/threads/{}/prune",
+        client.endpoint(),
+        thread_id
+    );
+    client.post_json(&url, &serde_json::json!({})).await?;
+    println!("Pruned old checkpoints from thread: {}", thread_id);
+    Ok(())
+}

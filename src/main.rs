@@ -21,42 +21,44 @@ use crate::ui::print_error;
 #[derive(Parser, Debug)]
 #[command(
     name = "ailsd",
-    about = "CLI for chatting with LangGraph deployments",
-    long_about = "Chat with LangGraph deployments from the terminal.\n\n\
-        Works out of the box with Chat Langchain (Q&A over LangChain docs). \
+    about = "Your friendly neighborhood LangGraph CLI",
+    long_about = "Chat, debug, load test, and manage LangGraph deployments — all from your terminal.\n\n\
+        Works out of the box with Chat Langchain (Q&A over LangChain docs).\n\
         Run 'ailsd context create <name>' to connect your own deployment.",
-    after_help = "\x1b[1mExamples:\x1b[0m
-  \x1b[2m# Interactive chat\x1b[0m
+    after_help = "\x1b[1;35m~ Examples ~\x1b[0m
+
+  \x1b[2m# Interactive chat (the fun part)\x1b[0m
   ailsd
 
-  \x1b[2m# Resume a previous thread\x1b[0m
+  \x1b[2m# Resume where you left off\x1b[0m
   ailsd --resume
 
-  \x1b[2m# Pipe mode (non-interactive, uses /runs/wait)\x1b[0m
+  \x1b[2m# Pipe mode — great for scripts\x1b[0m
   echo \"what is langgraph?\" | ailsd
-  echo \"tell me more\" | ailsd --thread-id <id>
   echo \"explain agents\" | ailsd --json | jq .
 
-  \x1b[2m# Chain with other tools\x1b[0m
-  cat README.md | ailsd
-  echo \"summarize this\" | ailsd | pbcopy
+  \x1b[2m# Explore your deployment\x1b[0m
+  ailsd assistants list
+  ailsd threads list
+  ailsd assistants graph agent --ascii
+
+  \x1b[2m# Load test like a pro\x1b[0m
+  ailsd bench --concurrent 10 --requests 50
+
+  \x1b[2m# Debug runs and traces\x1b[0m
+  ailsd logs --last 10
+  ailsd runs list <thread-id>
 
   \x1b[2m# Manage contexts (like kubectl)\x1b[0m
   ailsd context create production
   ailsd context use production
-  ailsd context list
 
-  \x1b[2m# Local override via .ailsd.yaml in cwd\x1b[0m
-  echo 'endpoint: https://my-dev.langgraph.app' > .ailsd.yaml
-  ailsd  # uses local config
-
-\x1b[1mInteractive keys:\x1b[0m
+\x1b[1;35m~ Interactive keys ~\x1b[0m
   Enter          Send message
   Alt+Enter      Insert newline
-  Esc Esc        Cancel running response
-  Ctrl+C Ctrl+C  Quit
-  /quit          Quit
-  /configure     Reconfigure connection"
+  Esc Esc        Cancel streaming
+  F12            Toggle devtools
+  Ctrl+C Ctrl+C  Quit"
 )]
 struct Cli {
     /// Resume a previous chat thread
@@ -157,7 +159,12 @@ enum AssistantAction {
     /// Get assistant details
     Get { id: String },
     /// Show assistant graph structure
-    Graph { id: String },
+    Graph {
+        id: String,
+        /// Render as ASCII art instead of JSON
+        #[arg(long)]
+        ascii: bool,
+    },
     /// Show state and config schemas
     Schemas { id: String },
     /// List assistant versions
@@ -185,6 +192,10 @@ enum ThreadAction {
         #[arg(long, default_value = "10")]
         limit: usize,
     },
+    /// Copy/fork a thread
+    Copy { id: String },
+    /// Prune old checkpoints from a thread
+    Prune { id: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -199,6 +210,12 @@ enum RunAction {
     Get { thread_id: String, run_id: String },
     /// Cancel a running run
     Cancel { thread_id: String, run_id: String },
+    /// Watch runs for a thread (live status updates)
+    Watch {
+        thread_id: String,
+        #[arg(long, default_value = "2")]
+        interval: u64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -351,7 +368,7 @@ async fn main() -> Result<()> {
                 match action {
                     AssistantAction::List => commands::assistants::list(&client).await,
                     AssistantAction::Get { id } => commands::assistants::get(&client, &id).await,
-                    AssistantAction::Graph { id } => commands::assistants::graph(&client, &id).await,
+                    AssistantAction::Graph { id, ascii } => commands::assistants::graph(&client, &id, ascii).await,
                     AssistantAction::Schemas { id } => commands::assistants::schemas(&client, &id).await,
                     AssistantAction::Versions { id } => commands::assistants::versions(&client, &id).await,
                 }
@@ -366,6 +383,8 @@ async fn main() -> Result<()> {
                     ThreadAction::Delete { id } => commands::threads::delete(&client, &id).await,
                     ThreadAction::State { id } => commands::threads::state(&client, &id).await,
                     ThreadAction::History { id, limit } => commands::threads::history(&client, &id, limit).await,
+                    ThreadAction::Copy { id } => commands::threads::copy(&client, &id).await,
+                    ThreadAction::Prune { id } => commands::threads::prune(&client, &id).await,
                 }
             }).await;
         }
@@ -375,6 +394,7 @@ async fn main() -> Result<()> {
                     RunAction::List { thread_id, limit } => commands::runs::list(&client, &thread_id, limit).await,
                     RunAction::Get { thread_id, run_id } => commands::runs::get(&client, &thread_id, &run_id).await,
                     RunAction::Cancel { thread_id, run_id } => commands::runs::cancel(&client, &thread_id, &run_id).await,
+                    RunAction::Watch { thread_id, interval } => commands::runs::watch(&client, &thread_id, interval).await,
                 }
             }).await;
         }

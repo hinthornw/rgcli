@@ -94,7 +94,7 @@ async fn run_single(client: &Client, assistant_id: &str, input: &str) -> RunResu
 
     tokio::spawn(async move {
         client_clone
-            .stream_run(&thread_id, &assistant_id, &input, None, &tx)
+            .stream_run(&thread_id, &assistant_id, &input, None, None, &tx)
             .await;
     });
 

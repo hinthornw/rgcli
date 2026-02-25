@@ -68,6 +68,7 @@ enum Action {
     ListAssistants,
     SwitchAssistant(String),
     Export,
+    Mode(String),
 }
 
 #[derive(Clone)]
@@ -136,6 +137,9 @@ struct App {
     // Dev toolbar
     devtools: bool,
     metrics: RunMetrics,
+
+    // Stream mode
+    stream_mode: String,
 }
 
 #[derive(Default, Clone)]
@@ -187,6 +191,7 @@ impl App {
             project_id: None,
             devtools: false,
             metrics: RunMetrics::default(),
+            stream_mode: "messages-tuple".to_string(),
         }
     }
 
@@ -426,6 +431,13 @@ async fn run_event_loop(
                     }
                     Action::Export => {
                         export_conversation(app);
+                        reset_textarea(app);
+                    }
+                    Action::Mode(mode) => {
+                        app.stream_mode = mode.clone();
+                        app.messages.push(ChatMessage::System(
+                            format!("Stream mode set to: {mode}"),
+                        ));
                         reset_textarea(app);
                     }
                     Action::None => {}
@@ -824,6 +836,14 @@ fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         Style::new().fg(Color::DarkGray),
     ));
 
+    // Show stream mode if not default
+    if app.stream_mode != "messages-tuple" {
+        left_parts.push(Span::styled(
+            format!(" | mode:{}", app.stream_mode),
+            Style::new().fg(Color::Yellow),
+        ));
+    }
+
     if !app.pending_attachments.is_empty() {
         left_parts.push(Span::styled(
             format!(" | {} attached", app.pending_attachments.len()),
@@ -1037,6 +1057,7 @@ fn start_run(
     let assistant_id = assistant_id.to_string();
     let message = message.to_string();
     let strategy = multitask_strategy.map(String::from);
+    let stream_mode = app.stream_mode.clone();
 
     tokio::spawn(async move {
         client
@@ -1045,6 +1066,7 @@ fn start_run(
                 &assistant_id,
                 &message,
                 strategy.as_deref(),
+                Some(&stream_mode),
                 &tx,
             )
             .await;
@@ -1077,10 +1099,11 @@ fn start_run_with_attachments(
     let assistant_id = assistant_id.to_string();
     let message = message.to_string();
     let attachments = attachments.to_vec();
+    let stream_mode = app.stream_mode.clone();
 
     tokio::spawn(async move {
         client
-            .stream_run_with_attachments(&thread_id, &assistant_id, &message, &attachments, &tx)
+            .stream_run_with_attachments(&thread_id, &assistant_id, &message, &attachments, Some(&stream_mode), &tx)
             .await;
     });
 }
@@ -1108,10 +1131,11 @@ fn start_resume(
     let client = client.clone();
     let thread_id = thread_id.to_string();
     let assistant_id = assistant_id.to_string();
+    let stream_mode = app.stream_mode.clone();
 
     tokio::spawn(async move {
         client
-            .resume_run(&thread_id, &assistant_id, input, &tx)
+            .resume_run(&thread_id, &assistant_id, input, Some(&stream_mode), &tx)
             .await;
     });
 }
@@ -1230,6 +1254,26 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
                 let id = id.trim();
                 if !id.is_empty() {
                     return Action::SwitchAssistant(id.to_string());
+                }
+            }
+            if value == "/mode" {
+                return Action::Help;
+            }
+            if let Some(mode) = value.strip_prefix("/mode ") {
+                let mode = mode.trim();
+                if !mode.is_empty() {
+                    // Validate mode
+                    let valid_modes = ["messages-tuple", "values", "updates", "events", "debug"];
+                    if valid_modes.contains(&mode) {
+                        return Action::Mode(mode.to_string());
+                    } else {
+                        app.messages.push(ChatMessage::Error(format!(
+                            "Invalid mode: {mode}. Valid modes: {}",
+                            valid_modes.join(", ")
+                        )));
+                        reset_textarea(app);
+                        return Action::None;
+                    }
                 }
             }
             return Action::Send(value);
@@ -1556,6 +1600,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/assistant",
         desc: "List or switch assistants",
+    },
+    SlashCommand {
+        name: "/mode",
+        desc: "Switch stream mode (/mode <mode>)",
     },
     SlashCommand {
         name: "/attach",

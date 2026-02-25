@@ -199,6 +199,7 @@ impl Client {
         assistant_id: &str,
         user_message: &str,
         multitask_strategy: Option<&str>,
+        stream_mode: Option<&str>,
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) {
         let result = self
@@ -207,6 +208,7 @@ impl Client {
                 assistant_id,
                 user_message,
                 multitask_strategy,
+                stream_mode,
                 tx,
             )
             .await;
@@ -220,11 +222,12 @@ impl Client {
         assistant_id: &str,
         user_message: &str,
         attachments: &[Attachment],
+        stream_mode: Option<&str>,
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
         let run_req =
-            new_run_request_with_attachments(assistant_id, user_message, attachments, None);
+            new_run_request_with_attachments(assistant_id, user_message, attachments, None, stream_mode);
         let result = self.do_stream(&url, &run_req, tx).await;
         let _ = tx.send(StreamEvent::Done(result));
     }
@@ -235,10 +238,11 @@ impl Client {
         thread_id: &str,
         assistant_id: &str,
         input: Option<Value>,
+        stream_mode: Option<&str>,
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
-        let run_req = new_resume_request(assistant_id, input);
+        let run_req = new_resume_request(assistant_id, input, stream_mode);
         let result = self.do_stream(&url, &run_req, tx).await;
         let _ = tx.send(StreamEvent::Done(result));
     }
@@ -249,10 +253,11 @@ impl Client {
         assistant_id: &str,
         user_message: &str,
         multitask_strategy: Option<&str>,
+        stream_mode: Option<&str>,
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) -> Result<()> {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
-        let run_req = new_run_request(assistant_id, user_message, multitask_strategy);
+        let run_req = new_run_request(assistant_id, user_message, multitask_strategy, stream_mode);
         self.do_stream(&url, &run_req, tx).await
     }
 
@@ -294,7 +299,7 @@ impl Client {
         user_message: &str,
     ) -> Result<serde_json::Value> {
         let url = format!("{}/threads/{}/runs/wait", self.endpoint, thread_id);
-        let run_req = new_run_request(assistant_id, user_message, None);
+        let run_req = new_run_request(assistant_id, user_message, None, None);
         let resp = self
             .http
             .post(url)

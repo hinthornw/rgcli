@@ -29,9 +29,23 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
 
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-cargo-
+
       - name: Install cross-compilation tools (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: gcc-aarch64-linux-gnu
+          version: 1.0
 
       - name: Build
         run: |
@@ -78,7 +92,6 @@ jobs:
               chmod +x "$bin"
               slug="${target_map[$target]}"
               archive="ailsd_${version}_${slug}.tar.gz"
-              # tar needs the binary named "ailsd"
               cp "$bin" ailsd
               chmod +x ailsd
               tar czf "dist/${archive}" ailsd

@@ -13,9 +13,14 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area:
     lines.extend(app.welcome_lines.clone());
 
     for (idx, msg) in app.messages.iter().enumerate() {
+        let is_current_match = app.search_mode
+            && !app.search_matches.is_empty()
+            && app.search_matches.get(app.search_match_idx) == Some(&idx);
         let is_match = app.search_mode && app.search_matches.contains(&idx);
-        let highlight_style = if is_match {
-            Style::new().bg(Color::Rgb(60, 60, 0))
+        let highlight_style = if is_current_match {
+            Style::new().bg(Color::Rgb(100, 100, 0))
+        } else if is_match {
+            Style::new().bg(Color::Rgb(40, 40, 0))
         } else {
             Style::default()
         };
@@ -164,6 +169,10 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area:
     }
 
     let max_scroll = compute_auto_scroll(&lines, area);
+    // Clamp scroll_offset so user can't scroll past the top
+    if app.scroll_offset > max_scroll {
+        app.scroll_offset = max_scroll;
+    }
     let scroll = if app.auto_scroll {
         max_scroll
     } else {
@@ -371,11 +380,16 @@ pub(super) fn render_status(frame: &mut ratatui::Frame, app: &ChatState, area: R
     if app.search_mode {
         let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
-        let search_text = format!(
-            " Search: {} ({} matches)",
-            app.search_query,
-            app.search_matches.len()
-        );
+        let search_text = if app.search_matches.is_empty() {
+            format!(" Search: {} (no matches)", app.search_query)
+        } else {
+            format!(
+                " Search: {} ({}/{} ↑↓ to navigate)",
+                app.search_query,
+                app.search_match_idx + 1,
+                app.search_matches.len()
+            )
+        };
         let search_line = Line::from(Span::styled(
             search_text,
             Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),

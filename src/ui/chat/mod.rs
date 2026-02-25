@@ -155,6 +155,7 @@ pub struct ChatState {
     pub(crate) search_mode: bool,
     pub(crate) search_query: String,
     pub(crate) search_matches: Vec<usize>,
+    pub(crate) search_match_idx: usize,
 
     // Mascot
     pub(crate) parrot: Parrot,
@@ -198,6 +199,7 @@ impl ChatState {
             search_mode: false,
             search_query: String::new(),
             search_matches: Vec::new(),
+            search_match_idx: 0,
             parrot: Parrot::new(),
         }
     }

@@ -186,7 +186,7 @@ pub(super) fn show_help(app: &mut ChatState) {
     app.messages
         .push(ChatMessage::System("  Ctrl+C Ctrl+C  Quit".to_string()));
     app.messages.push(ChatMessage::System(
-        "  Ctrl+R         Toggle search mode".to_string(),
+        "  Ctrl+F         Search (↑/↓ to navigate matches)".to_string(),
     ));
     app.messages.push(ChatMessage::System(
         "  PageUp/Down    Scroll chat history".to_string(),

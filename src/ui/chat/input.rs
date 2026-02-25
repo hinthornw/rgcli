@@ -92,15 +92,42 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
     // Handle search mode
     if app.search_mode {
         match key.code {
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Enter => {
                 app.search_mode = false;
                 app.search_query.clear();
                 app.search_matches.clear();
+                app.search_match_idx = 0;
                 return Action::None;
             }
             KeyCode::Backspace => {
                 app.search_query.pop();
                 update_search_matches(app);
+                return Action::None;
+            }
+            KeyCode::Up | KeyCode::Char('p')
+                if key.code == KeyCode::Up
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // Navigate to previous match
+                if !app.search_matches.is_empty() {
+                    if app.search_match_idx > 0 {
+                        app.search_match_idx -= 1;
+                    } else {
+                        app.search_match_idx = app.search_matches.len() - 1;
+                    }
+                    scroll_to_match(app);
+                }
+                return Action::None;
+            }
+            KeyCode::Down | KeyCode::Char('n')
+                if key.code == KeyCode::Down
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // Navigate to next match
+                if !app.search_matches.is_empty() {
+                    app.search_match_idx = (app.search_match_idx + 1) % app.search_matches.len();
+                    scroll_to_match(app);
+                }
                 return Action::None;
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -128,7 +155,7 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             return Action::Quit;
         }
-        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.search_mode = !app.search_mode;
             if !app.search_mode {
                 app.search_query.clear();
@@ -311,8 +338,23 @@ pub(super) fn collect_input(textarea: &TextArea) -> String {
         .to_string()
 }
 
+/// Scroll the chat view so the current search match is visible.
+fn scroll_to_match(app: &mut ChatState) {
+    if app.search_matches.is_empty() {
+        return;
+    }
+    let match_msg_idx = app.search_matches[app.search_match_idx];
+    // Estimate: each message is roughly 2 lines from the top.
+    // We use message count as a rough proxy — the render will clamp.
+    let total = app.messages.len();
+    let from_bottom = total.saturating_sub(match_msg_idx);
+    app.scroll_offset = (from_bottom as u16).saturating_mul(2);
+    app.auto_scroll = false;
+}
+
 fn update_search_matches(app: &mut ChatState) {
     app.search_matches.clear();
+    app.search_match_idx = 0;
     if app.search_query.is_empty() {
         return;
     }

@@ -267,8 +267,8 @@ pub fn build(
 /// Check if uvx is available.
 fn find_uvx() -> Option<String> {
     for candidate in &["uvx", "uv"] {
-        if which::which(candidate).is_ok() {
-            return Some(candidate.to_string());
+        if let Ok(path) = which::which(candidate) {
+            return Some(path.to_string_lossy().to_string());
         }
     }
     None
@@ -277,8 +277,8 @@ fn find_uvx() -> Option<String> {
 /// Find the Python interpreter, preferring python3 over python.
 fn find_python() -> Result<String, String> {
     for candidate in &["python3", "python"] {
-        if which::which(candidate).is_ok() {
-            return Ok(candidate.to_string());
+        if let Ok(path) = which::which(candidate) {
+            return Ok(path.to_string_lossy().to_string());
         }
     }
     Err(
@@ -417,7 +417,7 @@ run_server(
     // Spawn subprocess with config on stdin
     let mut child = match &run_mode {
         RunMode::Uvx(bin) => {
-            let mut cmd = if bin == "uv" {
+            let mut cmd = if bin.ends_with("/uv") || bin == "uv" {
                 let mut c = Command::new(bin);
                 c.arg("tool").arg("run");
                 c

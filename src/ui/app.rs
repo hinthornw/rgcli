@@ -128,17 +128,13 @@ impl TuiApp {
     }
 
     fn poll_screens(&mut self) {
+        self.chat.poll_history();
         self.threads.poll();
         self.assistants.poll();
         self.runs.poll();
         self.store.poll();
         self.crons.poll();
         self.logs.poll();
-
-        // If threads screen deleted + needs reload
-        if self.screen == Screen::Threads {
-            // ThreadsScreen handles this internally via poll
-        }
     }
 
     fn handle_event(&mut self, event: Event) -> Option<ChatExit> {
@@ -226,6 +222,7 @@ impl TuiApp {
         match ctx {
             ScreenContext::Thread(tid) => {
                 self.thread_id = tid.clone();
+                self.chat.load_thread_history(&self.client, tid);
             }
         }
     }

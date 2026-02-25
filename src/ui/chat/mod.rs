@@ -159,6 +159,9 @@ pub struct ChatState {
 
     // Mascot
     pub(crate) parrot: Parrot,
+
+    // Thread history loading
+    pub(crate) history_rx: Option<mpsc::UnboundedReceiver<crate::api::types::ThreadState>>,
 }
 
 impl ChatState {
@@ -201,6 +204,7 @@ impl ChatState {
             search_matches: Vec::new(),
             search_match_idx: 0,
             parrot: Parrot::new(),
+            history_rx: None,
         }
     }
 
@@ -430,6 +434,85 @@ impl ChatState {
 
     pub fn parrot_mut(&mut self) -> &mut Parrot {
         &mut self.parrot
+    }
+
+    /// Start an async fetch of thread state to populate chat history.
+    pub fn load_thread_history(&mut self, client: &Client, thread_id: &str) {
+        self.messages.clear();
+        self.scroll_offset = 0;
+        self.auto_scroll = true;
+        self.interrupted = false;
+        self.streaming_text.clear();
+        self.stream_rx = None;
+        self.active_run_id = None;
+        self.is_waiting = true;
+        helpers::reset_textarea(self);
+
+        let client = client.clone();
+        let tid = thread_id.to_string();
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.history_rx = Some(rx);
+        tokio::spawn(async move {
+            match client.get_thread_state(&tid).await {
+                Ok(state) => {
+                    let _ = tx.send(state);
+                }
+                Err(_) => {
+                    // Thread may be empty or not exist yet — that's fine
+                }
+            }
+        });
+    }
+
+    /// Poll for thread history load completion.
+    pub fn poll_history(&mut self) {
+        if let Some(rx) = &mut self.history_rx {
+            if let Ok(state) = rx.try_recv() {
+                let messages = crate::api::types::get_messages(&state.values);
+                for msg in &messages {
+                    match msg.role.as_str() {
+                        "user" | "human" => {
+                            self.messages.push(ChatMessage::User(msg.content.clone()));
+                        }
+                        "assistant" | "ai" => {
+                            for tc in &msg.tool_calls {
+                                self.messages
+                                    .push(ChatMessage::ToolUse(tc.name.clone(), tc.args.clone()));
+                            }
+                            if !msg.content.is_empty() {
+                                self.messages
+                                    .push(ChatMessage::Assistant(msg.content.clone()));
+                            }
+                        }
+                        "tool" => {
+                            let name =
+                                msg.tool_name.clone().unwrap_or_else(|| "tool".to_string());
+                            self.messages
+                                .push(ChatMessage::ToolResult(name, msg.content.clone()));
+                        }
+                        _ => {
+                            self.messages.push(ChatMessage::System(format!(
+                                "[{}] {}",
+                                msg.role, msg.content
+                            )));
+                        }
+                    }
+                }
+
+                // Check if thread is interrupted (has pending next nodes)
+                if let Some(next) = &state.next {
+                    if !next.is_empty() {
+                        self.interrupted = true;
+                        self.messages.push(ChatMessage::System(
+                            "Thread is waiting for input. Press Enter to resume.".to_string(),
+                        ));
+                    }
+                }
+
+                self.is_waiting = false;
+                self.history_rx = None;
+            }
+        }
     }
 }
 

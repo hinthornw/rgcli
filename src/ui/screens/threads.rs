@@ -14,7 +14,6 @@ use crate::ui::widgets::resource_table::{Column, ResourceTable};
 enum AsyncResult {
     Rows(Vec<Vec<String>>),
     Error(String),
-    Deleted,
     Detail(ThreadState),
     DetailError(String),
 }
@@ -114,18 +113,9 @@ impl ThreadsScreen {
 
         let client = client.clone();
         let tid = thread_id.to_string();
-        // Reuse the same channel
-        let tx = if let Some(rx) = self.async_rx.take() {
-            // Create new channel, drop old rx
-            drop(rx);
-            let (tx, rx) = mpsc::unbounded_channel();
-            self.async_rx = Some(rx);
-            tx
-        } else {
-            let (tx, rx) = mpsc::unbounded_channel();
-            self.async_rx = Some(rx);
-            tx
-        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        // Drop old receiver if any
+        self.async_rx = Some(rx);
 
         tokio::spawn(async move {
             match client.get_thread_state(&tid).await {
@@ -170,16 +160,6 @@ impl ThreadsScreen {
                     AsyncResult::Error(e) => {
                         self.table.set_error(e);
                         self.loaded = true;
-                    }
-                    AsyncResult::Deleted => {
-                        self.loaded = false;
-                        self.table.loading = true;
-                        self.detail_thread_id = None;
-                        self.detail_state = None;
-                        self.detail_messages.clear();
-                        self.detail_loading = false;
-                        self.detail_error = None;
-                        self.detail_scroll = 0;
                     }
                     AsyncResult::Detail(state) => {
                         self.detail_messages = get_messages(&state.values);
@@ -235,28 +215,6 @@ impl ThreadsScreen {
                     self.detail_scroll = self.detail_scroll.saturating_add(10);
                     return ScreenAction::None;
                 }
-                KeyCode::Char('d') => {
-                    // Delete this thread
-                    if let Some(full_id) = self.detail_thread_id.clone() {
-                        let client = client.clone();
-                        let (tx, rx) = mpsc::unbounded_channel();
-                        self.async_rx = Some(rx);
-                        self.loaded = false;
-                        self.table.loading = true;
-                        tokio::spawn(async move {
-                            let url = format!("{}/threads/{}", client.endpoint(), full_id);
-                            match client.delete_url(&url).await {
-                                Ok(()) => {
-                                    let _ = tx.send(AsyncResult::Deleted);
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(AsyncResult::Error(e.to_string()));
-                                }
-                            }
-                        });
-                    }
-                    return ScreenAction::None;
-                }
                 _ => return ScreenAction::None,
             }
         }
@@ -277,29 +235,6 @@ impl ThreadsScreen {
             KeyCode::Char('r') => {
                 self.loaded = false;
                 self.on_enter(client);
-                ScreenAction::None
-            }
-            KeyCode::Char('d') => {
-                if let Some(sel) = self.table.state.selected() {
-                    if let Some(full_id) = self.thread_ids.get(sel).cloned() {
-                        let client = client.clone();
-                        let (tx, rx) = mpsc::unbounded_channel();
-                        self.async_rx = Some(rx);
-                        self.loaded = false;
-                        self.table.loading = true;
-                        tokio::spawn(async move {
-                            let url = format!("{}/threads/{}", client.endpoint(), full_id);
-                            match client.delete_url(&url).await {
-                                Ok(()) => {
-                                    let _ = tx.send(AsyncResult::Deleted);
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(AsyncResult::Error(e.to_string()));
-                                }
-                            }
-                        });
-                    }
-                }
                 ScreenAction::None
             }
             KeyCode::Char('q') | KeyCode::Esc => ScreenAction::Navigate(Screen::Chat),
@@ -382,7 +317,7 @@ impl ThreadsScreen {
             for tc in &msg.tool_calls {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        format!("{label}: ", ),
+                        format!("{label}: "),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
@@ -419,8 +354,6 @@ impl ThreadsScreen {
         lines.push(Line::from(vec![
             Span::styled("[Enter] ", Style::default().fg(Color::Cyan)),
             Span::raw("Open in Chat  "),
-            Span::styled("[d] ", Style::default().fg(Color::Red)),
-            Span::raw("Delete  "),
             Span::styled("[Esc] ", Style::default().fg(Color::DarkGray)),
             Span::raw("Close"),
         ]));
@@ -433,7 +366,6 @@ impl ThreadsScreen {
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
-    // Take first line, truncate
     let first_line = s.lines().next().unwrap_or(s);
     if first_line.len() > max {
         format!("{}…", &first_line[..max])

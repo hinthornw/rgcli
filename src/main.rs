@@ -1,4 +1,5 @@
 mod api;
+mod bench;
 mod commands;
 mod config;
 mod context;
@@ -119,6 +120,33 @@ enum Command {
     Crons {
         #[command(subcommand)]
         action: CronAction,
+    },
+    /// Load test a deployment
+    Bench {
+        /// Number of concurrent requests
+        #[arg(long, default_value = "5")]
+        concurrent: usize,
+        /// Total number of requests
+        #[arg(long, default_value = "20")]
+        requests: usize,
+        /// Input message to send
+        #[arg(long, default_value = "hello")]
+        input: String,
+        /// File with inputs (one per line)
+        #[arg(long)]
+        input_file: Option<String>,
+    },
+    /// View run logs and traces
+    Logs {
+        /// Thread ID to show logs for
+        #[arg(long)]
+        thread: Option<String>,
+        /// Run ID to show details for
+        #[arg(long)]
+        run: Option<String>,
+        /// Show last N runs
+        #[arg(long, default_value = "5")]
+        last: usize,
     },
 }
 
@@ -368,6 +396,24 @@ async fn main() -> Result<()> {
                     CronAction::Create { assistant, schedule } => commands::crons::create(&client, &assistant, &schedule).await,
                     CronAction::Delete { id } => commands::crons::delete(&client, &id).await,
                 }
+            }).await;
+        }
+        Some(Command::Bench { concurrent, requests, input, input_file }) => {
+            return run_sdk_command(|client| async move {
+                let inputs = if let Some(path) = input_file {
+                    let content = std::fs::read_to_string(&path)
+                        .with_context(|| format!("failed to read {}", path))?;
+                    content.lines().filter(|l| !l.trim().is_empty()).map(String::from).collect()
+                } else {
+                    vec![input]
+                };
+                let cfg = config::load()?;
+                commands::bench::run(&client, &cfg.assistant_id, concurrent, requests, inputs).await
+            }).await;
+        }
+        Some(Command::Logs { thread, run, last }) => {
+            return run_sdk_command(|client| async move {
+                commands::logs::show(&client, thread.as_deref(), run.as_deref(), last).await
             }).await;
         }
         None => {}

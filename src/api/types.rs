@@ -400,4 +400,503 @@ mod tests {
         assert_eq!(messages[2].role, "tool");
         assert_eq!(messages[2].tool_name, Some("search".to_string()));
     }
+
+    #[test]
+    fn extract_tool_calls_from_tool_calls_field() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: Some(vec![
+                serde_json::json!({"name": "search", "args": {"query": "rust"}}),
+                serde_json::json!({"name": "calculator", "args": {"expr": "2+2"}}),
+            ]),
+            tool_call_chunks: None,
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "search");
+        assert!(calls[0].args.contains("rust"));
+        assert_eq!(calls[1].name, "calculator");
+        assert!(calls[1].args.contains("2+2"));
+    }
+
+    #[test]
+    fn extract_tool_calls_from_tool_call_chunks() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: None,
+            tool_call_chunks: Some(vec![
+                serde_json::json!({"name": "search", "args": "partial_args"}),
+            ]),
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(calls[0].args, "partial_args");
+    }
+
+    #[test]
+    fn extract_tool_calls_empty() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: Some(Value::String("hello".to_string())),
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn extract_tool_calls_with_string_args() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: Some(vec![
+                serde_json::json!({"name": "tool1", "args": "string_args"}),
+            ]),
+            tool_call_chunks: None,
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args, "string_args");
+    }
+
+    #[test]
+    fn extract_tool_calls_with_object_args() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: Some(vec![
+                serde_json::json!({"name": "tool1", "args": {"key": "value", "num": 42}}),
+            ]),
+            tool_call_chunks: None,
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        assert_eq!(calls.len(), 1);
+        // Args should be serialized as JSON
+        assert!(calls[0].args.contains("key"));
+        assert!(calls[0].args.contains("value"));
+    }
+
+    #[test]
+    fn extract_tool_calls_filters_empty_names() {
+        let chunk = MessageChunk {
+            id: Some("msg1".to_string()),
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: Some(vec![
+                serde_json::json!({"name": "", "args": {"key": "value"}}),
+                serde_json::json!({"name": "valid_tool", "args": {"key": "value"}}),
+            ]),
+            tool_call_chunks: None,
+            name: None,
+        };
+
+        let calls = extract_tool_calls(&chunk);
+        // Should filter out empty name
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "valid_tool");
+    }
+
+    #[test]
+    fn is_ai_chunk_with_ai_message_chunk() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert!(is_ai_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_ai_chunk_with_lowercase_ai() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("ai".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert!(is_ai_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_ai_chunk_with_tool_message() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("ToolMessage".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert!(!is_ai_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_tool_chunk_with_tool_message() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("ToolMessage".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: Some("tool_name".to_string()),
+        };
+        assert!(is_tool_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_tool_chunk_with_tool_message_chunk() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("ToolMessageChunk".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: Some("tool_name".to_string()),
+        };
+        assert!(is_tool_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_tool_chunk_with_lowercase_tool() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("tool".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: Some("tool_name".to_string()),
+        };
+        assert!(is_tool_chunk(&chunk));
+    }
+
+    #[test]
+    fn is_tool_chunk_with_ai_message() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: Some("AIMessageChunk".to_string()),
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert!(!is_tool_chunk(&chunk));
+    }
+
+    #[test]
+    fn message_chunk_content_string() {
+        let chunk = MessageChunk {
+            id: None,
+            content: Some(Value::String("Hello, world!".to_string())),
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert_eq!(message_chunk_content(&chunk), "Hello, world!");
+    }
+
+    #[test]
+    fn message_chunk_content_multimodal_array() {
+        let chunk = MessageChunk {
+            id: None,
+            content: Some(serde_json::json!([
+                {"type": "text", "text": "First part"},
+                {"type": "text", "text": "Second part"}
+            ])),
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert_eq!(message_chunk_content(&chunk), "First partSecond part");
+    }
+
+    #[test]
+    fn message_chunk_content_multimodal_with_image() {
+        let chunk = MessageChunk {
+            id: None,
+            content: Some(serde_json::json!([
+                {"type": "text", "text": "Here is an image: "},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+            ])),
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        // Should only extract text content, ignore image
+        assert_eq!(message_chunk_content(&chunk), "Here is an image: ");
+    }
+
+    #[test]
+    fn message_chunk_content_empty() {
+        let chunk = MessageChunk {
+            id: None,
+            content: None,
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert_eq!(message_chunk_content(&chunk), "");
+    }
+
+    #[test]
+    fn message_chunk_content_empty_array() {
+        let chunk = MessageChunk {
+            id: None,
+            content: Some(serde_json::json!([])),
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert_eq!(message_chunk_content(&chunk), "");
+    }
+
+    #[test]
+    fn message_chunk_content_array_without_text() {
+        let chunk = MessageChunk {
+            id: None,
+            content: Some(serde_json::json!([
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+            ])),
+            chunk_type: None,
+            tool_calls: None,
+            tool_call_chunks: None,
+            name: None,
+        };
+        assert_eq!(message_chunk_content(&chunk), "");
+    }
+
+    #[test]
+    fn new_run_request_basic() {
+        let request = new_run_request("assistant-123", "Hello", None, None);
+
+        assert_eq!(request.assistant_id, "assistant-123");
+        assert_eq!(request.stream_mode, vec!["messages-tuple"]);
+        assert_eq!(request.if_not_exists, Some("create".to_string()));
+        assert_eq!(request.multitask_strategy, None);
+
+        // Check input structure
+        let messages = request.input.get("messages").unwrap().as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        let msg = &messages[0];
+        assert_eq!(msg.get("role").unwrap().as_str().unwrap(), "user");
+        assert_eq!(msg.get("content").unwrap().as_str().unwrap(), "Hello");
+    }
+
+    #[test]
+    fn new_run_request_with_multitask() {
+        let request = new_run_request("assistant-123", "Hello", Some("reject"), None);
+
+        assert_eq!(request.multitask_strategy, Some("reject".to_string()));
+    }
+
+    #[test]
+    fn new_run_request_with_custom_stream_mode() {
+        let request = new_run_request("assistant-123", "Hello", None, Some("values"));
+
+        assert_eq!(request.stream_mode, vec!["values"]);
+    }
+
+    #[test]
+    fn test_run_request_with_attachments() {
+        let attachments = vec![
+            Attachment {
+                filename: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                base64_data: "iVBORw0KGgoAAAANS...".to_string(),
+            },
+        ];
+
+        let request = new_run_request_with_attachments(
+            "assistant-123",
+            "What's in this image?",
+            &attachments,
+            None,
+            None,
+        );
+
+        assert_eq!(request.assistant_id, "assistant-123");
+
+        // Check input has multimodal content
+        let messages = request.input.get("messages").unwrap().as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+
+        let content = messages[0].get("content").unwrap().as_array().unwrap();
+        assert_eq!(content.len(), 2); // Text + image
+
+        // Check text part
+        assert_eq!(content[0].get("type").unwrap().as_str().unwrap(), "text");
+        assert_eq!(content[0].get("text").unwrap().as_str().unwrap(), "What's in this image?");
+
+        // Check image part
+        assert_eq!(content[1].get("type").unwrap().as_str().unwrap(), "image_url");
+        let image_url = content[1].get("image_url").unwrap().get("url").unwrap().as_str().unwrap();
+        assert!(image_url.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn test_run_request_with_multiple_attachments() {
+        let attachments = vec![
+            Attachment {
+                filename: "image1.png".to_string(),
+                mime_type: "image/png".to_string(),
+                base64_data: "data1".to_string(),
+            },
+            Attachment {
+                filename: "image2.jpg".to_string(),
+                mime_type: "image/jpeg".to_string(),
+                base64_data: "data2".to_string(),
+            },
+        ];
+
+        let request = new_run_request_with_attachments(
+            "assistant-123",
+            "Compare these images",
+            &attachments,
+            None,
+            None,
+        );
+
+        let messages = request.input.get("messages").unwrap().as_array().unwrap();
+        let content = messages[0].get("content").unwrap().as_array().unwrap();
+
+        // Should have text + 2 images
+        assert_eq!(content.len(), 3);
+    }
+
+    #[test]
+    fn new_resume_request_basic() {
+        let request = new_resume_request("assistant-123", None, None);
+
+        assert_eq!(request.assistant_id, "assistant-123");
+        assert_eq!(request.stream_mode, vec!["messages-tuple"]);
+        assert_eq!(request.if_not_exists, None);
+        assert_eq!(request.multitask_strategy, None);
+        assert_eq!(request.input, Value::Null);
+    }
+
+    #[test]
+    fn new_resume_request_with_input() {
+        let input = serde_json::json!({"key": "value"});
+        let request = new_resume_request("assistant-123", Some(input.clone()), None);
+
+        assert_eq!(request.input, input);
+    }
+
+    #[test]
+    fn parse_message_chunk_object() {
+        let data = r#"{"content":"test","type":"AIMessageChunk"}"#;
+        let chunk = parse_message_chunk(data).unwrap().unwrap();
+        assert_eq!(message_chunk_content(&chunk), "test");
+        assert!(is_ai_chunk(&chunk));
+    }
+
+    #[test]
+    fn parse_message_chunk_null() {
+        let data = r#"null"#;
+        let result = parse_message_chunk(data).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_message_chunk_empty_array() {
+        let data = r#"[]"#;
+        let result = parse_message_chunk(data).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_messages_multimodal_content() {
+        let values = serde_json::json!({
+            "messages": [
+                {
+                    "type": "human",
+                    "content": [
+                        {"type": "text", "text": "What is this?"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+                    ]
+                }
+            ]
+        });
+
+        let messages = get_messages(&values);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "What is this?");
+    }
+
+    #[test]
+    fn get_messages_merge_same_id() {
+        let values = serde_json::json!({
+            "messages": [
+                {"type": "ai", "content": "First part", "id": "msg1"},
+                {"type": "ai", "content": "Second part", "id": "msg1"}
+            ]
+        });
+
+        let messages = get_messages(&values);
+        // Should merge into single message
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].content.contains("First part"));
+        assert!(messages[0].content.contains("Second part"));
+    }
+
+    #[test]
+    fn get_messages_skip_empty() {
+        let values = serde_json::json!({
+            "messages": [
+                {"type": "human", "content": "Hello"},
+                {"type": "ai", "content": ""},
+                {"type": "human", "content": "Are you there?"}
+            ]
+        });
+
+        let messages = get_messages(&values);
+        // Empty AI message should be skipped
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "Hello");
+        assert_eq!(messages[1].content, "Are you there?");
+    }
+
+    #[test]
+    fn get_messages_tool_result() {
+        let values = serde_json::json!({
+            "messages": [
+                {"type": "tool", "name": "calculator", "content": "42", "id": "tool1"}
+            ]
+        });
+
+        let messages = get_messages(&values);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "tool");
+        assert_eq!(messages[0].tool_name, Some("calculator".to_string()));
+        assert_eq!(messages[0].content, "42");
+    }
 }

@@ -64,3 +64,242 @@ pub fn docker_tag(
         format!("{base_image}:{version_distro_tag}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_base_image_python_only() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            node_version: None,
+            base_image: None,
+            ..Default::default()
+        };
+        assert_eq!(default_base_image(&config), "langchain/langgraph-api");
+    }
+
+    #[test]
+    fn default_base_image_node_only() {
+        let config = Config {
+            python_version: None,
+            node_version: Some("20".to_string()),
+            base_image: None,
+            ..Default::default()
+        };
+        assert_eq!(default_base_image(&config), "langchain/langgraphjs-api");
+    }
+
+    #[test]
+    fn default_base_image_custom() {
+        let config = Config {
+            base_image: Some("custom/image".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(default_base_image(&config), "custom/image");
+    }
+
+    #[test]
+    fn default_base_image_both_languages() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            node_version: Some("20".to_string()),
+            base_image: None,
+            ..Default::default()
+        };
+        // Python takes precedence when both are present
+        assert_eq!(default_base_image(&config), "langchain/langgraph-api");
+    }
+
+    #[test]
+    fn docker_tag_python_default() {
+        let config = Config {
+            python_version: None,
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:3.11");
+    }
+
+    #[test]
+    fn docker_tag_python_custom_version() {
+        let config = Config {
+            python_version: Some("3.12".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:3.12");
+    }
+
+    #[test]
+    fn docker_tag_node_only() {
+        let config = Config {
+            node_version: Some("20".to_string()),
+            python_version: None,
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraphjs-api:20");
+    }
+
+    #[test]
+    fn docker_tag_with_api_version() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, Some("0.1.0"));
+        assert_eq!(tag, "langchain/langgraph-api:0.1.0-py3.11");
+    }
+
+    #[test]
+    fn docker_tag_with_config_api_version() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            api_version: Some("0.2.0".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:0.2.0-py3.11");
+    }
+
+    #[test]
+    fn docker_tag_api_version_override() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            api_version: Some("0.1.0".to_string()),
+            ..Default::default()
+        };
+        // Parameter api_version should override config.api_version
+        let tag = docker_tag(&config, None, Some("0.2.0"));
+        assert_eq!(tag, "langchain/langgraph-api:0.2.0-py3.11");
+    }
+
+    #[test]
+    fn docker_tag_custom_base_image() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            base_image: Some("custom/base".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "custom/base:3.11");
+    }
+
+    #[test]
+    fn docker_tag_base_image_override() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            base_image: Some("config/base".to_string()),
+            ..Default::default()
+        };
+        // Parameter base_image should override config.base_image
+        let tag = docker_tag(&config, Some("override/base"), None);
+        assert_eq!(tag, "override/base:3.11");
+    }
+
+    #[test]
+    fn docker_tag_wolfi_distro() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            image_distro: Some("wolfi".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:3.11-wolfi");
+    }
+
+    #[test]
+    fn docker_tag_debian_distro_no_suffix() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            image_distro: Some("debian".to_string()),
+            ..Default::default()
+        };
+        // Debian is default, so no distro suffix
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:3.11");
+    }
+
+    #[test]
+    fn docker_tag_bookworm_distro() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            image_distro: Some("bookworm".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:3.11-bookworm");
+    }
+
+    #[test]
+    fn docker_tag_with_distro_and_api_version() {
+        let config = Config {
+            python_version: Some("3.12".to_string()),
+            image_distro: Some("wolfi".to_string()),
+            api_version: Some("0.1.0".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:0.1.0-py3.12-wolfi");
+    }
+
+    #[test]
+    fn docker_tag_internal_tag_override() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            internal_docker_tag: Some("custom-tag".to_string()),
+            ..Default::default()
+        };
+        // Internal docker tag should override all other tag logic
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraph-api:custom-tag");
+    }
+
+    #[test]
+    fn docker_tag_internal_tag_with_custom_base() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            base_image: Some("custom/base".to_string()),
+            internal_docker_tag: Some("special".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "custom/base:special");
+    }
+
+    #[test]
+    fn docker_tag_langgraph_server_path() {
+        let config = Config {
+            python_version: Some("3.11".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, Some("registry/langgraph-server"), None);
+        assert_eq!(tag, "registry/langgraph-server-py3.11");
+    }
+
+    #[test]
+    fn docker_tag_node_with_distro() {
+        let config = Config {
+            node_version: Some("20".to_string()),
+            python_version: None,
+            image_distro: Some("wolfi".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraphjs-api:20-wolfi");
+    }
+
+    #[test]
+    fn docker_tag_node_with_api_version() {
+        let config = Config {
+            node_version: Some("20".to_string()),
+            python_version: None,
+            api_version: Some("1.0.0".to_string()),
+            ..Default::default()
+        };
+        let tag = docker_tag(&config, None, None);
+        assert_eq!(tag, "langchain/langgraphjs-api:1.0.0-node20");
+    }
+}

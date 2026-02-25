@@ -227,12 +227,6 @@ impl TuiApp {
             ScreenContext::Thread(tid) => {
                 self.thread_id = tid.clone();
             }
-            ScreenContext::ThreadRuns(tid) => {
-                self.runs.set_thread(tid.clone());
-            }
-            ScreenContext::RunDetail(_, _) => {
-                // Future: show run detail
-            }
         }
     }
 

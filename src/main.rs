@@ -991,7 +991,6 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
         config_path,
         context_info,
         context_names,
-        assistant_id: cfg.assistant_id.clone(),
         available_assistants,
         tenant_id: None,
         project_id: None,

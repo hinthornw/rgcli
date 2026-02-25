@@ -57,6 +57,20 @@ impl Client {
         &self.endpoint
     }
 
+    /// Check HTTP response status, returning a descriptive error on failure.
+    async fn check(
+        resp: reqwest::Response,
+        ok: &[StatusCode],
+        op: &str,
+    ) -> Result<reqwest::Response> {
+        if ok.contains(&resp.status()) {
+            return Ok(resp);
+        }
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("{op}: {status} - {body}")
+    }
+
     /// Generic GET returning JSON.
     pub async fn get_json(&self, url: &str) -> Result<serde_json::Value> {
         let resp = self
@@ -65,11 +79,7 @@ impl Client {
             .headers(self.headers.clone())
             .send()
             .await?;
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("GET {} failed: {} - {}", url, status, body);
-        }
+        let resp = Self::check(resp, &[StatusCode::OK], &format!("GET {url}")).await?;
         Ok(resp.json().await?)
     }
 
@@ -86,11 +96,12 @@ impl Client {
             .json(body)
             .send()
             .await?;
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::CREATED {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("POST {} failed: {} - {}", url, status, body);
-        }
+        let resp = Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::CREATED],
+            &format!("POST {url}"),
+        )
+        .await?;
         Ok(resp.json().await?)
     }
 
@@ -103,11 +114,12 @@ impl Client {
             .json(body)
             .send()
             .await?;
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("PUT {} failed: {} - {}", url, status, body);
-        }
+        Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::NO_CONTENT],
+            &format!("PUT {url}"),
+        )
+        .await?;
         Ok(())
     }
 
@@ -119,14 +131,12 @@ impl Client {
             .headers(self.headers.clone())
             .send()
             .await?;
-        if resp.status() != StatusCode::OK
-            && resp.status() != StatusCode::NO_CONTENT
-            && resp.status() != StatusCode::ACCEPTED
-        {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("DELETE {} failed: {} - {}", url, status, body);
-        }
+        Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::NO_CONTENT, StatusCode::ACCEPTED],
+            &format!("DELETE {url}"),
+        )
+        .await?;
         Ok(())
     }
 
@@ -139,11 +149,12 @@ impl Client {
             .json(body)
             .send()
             .await?;
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("DELETE {} failed: {} - {}", url, status, body);
-        }
+        Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::NO_CONTENT],
+            &format!("DELETE {url}"),
+        )
+        .await?;
         Ok(())
     }
 
@@ -151,18 +162,17 @@ impl Client {
         let url = format!("{}/threads", self.endpoint);
         let resp = self
             .http
-            .post(url)
+            .post(&url)
             .headers(self.headers.clone())
             .body("{}")
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::CREATED {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to create thread: {} - {}", status, body);
-        }
-
+        let resp = Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::CREATED],
+            "create thread",
+        )
+        .await?;
         Ok(resp.json::<Thread>().await?)
     }
 
@@ -176,14 +186,24 @@ impl Client {
             .json(&body)
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to search threads: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "search threads").await?;
         Ok(resp.json::<Vec<Thread>>().await?)
+    }
+
+    pub async fn get_thread(&self, thread_id: &str, select_fields: &[&str]) -> Result<Thread> {
+        let mut url = format!("{}/threads/{}", self.endpoint, thread_id);
+        if !select_fields.is_empty() {
+            url.push_str("?select=");
+            url.push_str(&select_fields.join(","));
+        }
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "get thread").await?;
+        Ok(resp.json::<Thread>().await?)
     }
 
     pub async fn get_thread_state(&self, thread_id: &str) -> Result<ThreadState> {
@@ -194,37 +214,8 @@ impl Client {
             .headers(self.headers.clone())
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to get thread state: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "get thread state").await?;
         Ok(resp.json::<ThreadState>().await?)
-    }
-
-    #[allow(dead_code)]
-    pub async fn get_thread(&self, thread_id: &str, select_fields: &[&str]) -> Result<Thread> {
-        let mut url = format!("{}/threads/{}", self.endpoint, thread_id);
-        if !select_fields.is_empty() {
-            url.push_str("?select=");
-            url.push_str(&select_fields.join(","));
-        }
-        let resp = self
-            .http
-            .get(url)
-            .headers(self.headers.clone())
-            .send()
-            .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to get thread: {} - {}", status, body);
-        }
-
-        Ok(resp.json::<Thread>().await?)
     }
 
     /// Start a streaming run, sending events through the provided channel.
@@ -315,12 +306,7 @@ impl Client {
             .json(run_req)
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to create run: {} - {}", status, body);
-        }
+        let resp = Self::check(resp, &[StatusCode::OK], "create run").await?;
 
         let stream = resp.bytes_stream();
         let mut current_msg_id: Option<String> = None;
@@ -347,13 +333,7 @@ impl Client {
             .json(&run_req)
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("run failed: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "wait run").await?;
         Ok(resp.json().await?)
     }
 
@@ -366,13 +346,7 @@ impl Client {
             .headers(self.headers.clone())
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to get info: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "get info").await?;
         Ok(resp.json().await?)
     }
 
@@ -390,13 +364,7 @@ impl Client {
             .header("X-Tenant-Id", tenant_id)
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to get project details: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "get project details").await?;
         Ok(resp.json().await?)
     }
 
@@ -410,13 +378,7 @@ impl Client {
             .body("{}")
             .send()
             .await?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to list assistants: {} - {}", status, body);
-        }
-
+        let resp = Self::check(resp, &[StatusCode::OK], "list assistants").await?;
         Ok(resp.json().await?)
     }
 
@@ -433,12 +395,7 @@ impl Client {
             .body("{}")
             .send()
             .await?;
-
-        let status = resp.status();
-        if status != StatusCode::OK && status != StatusCode::ACCEPTED {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("failed to cancel run: {} - {}", status, body);
-        }
+        Self::check(resp, &[StatusCode::OK, StatusCode::ACCEPTED], "cancel run").await?;
         Ok(())
     }
 }

@@ -49,11 +49,6 @@ impl RunsScreen {
         }
     }
 
-    pub fn set_thread(&mut self, thread_id: String) {
-        self.thread_filter = Some(thread_id);
-        self.loaded = false;
-    }
-
     pub fn on_enter(&mut self, client: &Client) {
         if self.loaded {
             return;

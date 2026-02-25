@@ -50,10 +50,6 @@ impl Screen {
 #[derive(Debug, Clone)]
 pub enum ScreenContext {
     Thread(String),
-    #[allow(dead_code)]
-    ThreadRuns(String),
-    #[allow(dead_code)]
-    RunDetail(String, String),
 }
 
 pub enum ScreenAction {

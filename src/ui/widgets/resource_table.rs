@@ -56,13 +56,6 @@ impl ResourceTable {
         self.error = Some(err);
     }
 
-    #[allow(dead_code)]
-    pub fn selected_row(&self) -> Option<&Vec<String>> {
-        let idx = self.state.selected()?;
-        let real_idx = self.filtered_indices.get(idx)?;
-        self.rows.get(*real_idx)
-    }
-
     /// Returns true if the key was consumed
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         if self.filter_mode {

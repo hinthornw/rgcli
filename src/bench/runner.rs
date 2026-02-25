@@ -7,11 +7,11 @@ use crate::api::Client;
 
 /// Result of a single benchmark run.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct RunResult {
     pub duration: Duration,
     pub ttft: Option<Duration>,
     pub token_count: usize,
+    #[allow(dead_code)]
     pub total_chars: usize,
     pub success: bool,
     pub error: Option<String>,

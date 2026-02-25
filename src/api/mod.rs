@@ -1,4 +1,5 @@
 mod client;
+pub mod host;
 mod sse;
 pub mod types;
 

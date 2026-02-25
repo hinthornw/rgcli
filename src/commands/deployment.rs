@@ -581,6 +581,135 @@ pub fn dockerfile(
     Ok(())
 }
 
+/// Deploy to LangSmith cloud (internal_docker flow).
+///
+/// Builds a Docker image locally, pushes it to LangSmith's managed Artifact
+/// Registry, and creates or updates a cloud deployment.
+#[allow(clippy::too_many_arguments)]
+pub async fn deploy(
+    config: &str,
+    name: &str,
+    deployment_type: &str,
+    base_image: Option<&str>,
+    api_version: Option<&str>,
+    image: Option<&str>,
+) -> Result<(), String> {
+    // 1. Load config
+    let config_path = Path::new(config);
+    let config_json = crate::deploy::config::validate_config_file(config_path)?;
+    let _ = &config_json; // validate config exists and is valid
+
+    // 2. Resolve API key
+    let api_key = {
+        let cfg = crate::config::load().ok();
+        let from_cfg = cfg.as_ref().map(|c| c.api_key.clone()).unwrap_or_default();
+        if from_cfg.is_empty() {
+            std::env::var("LANGSMITH_API_KEY")
+                .map_err(|_| "No API key found. Set LANGSMITH_API_KEY or configure with `ailsd context`".to_string())?
+        } else {
+            from_cfg
+        }
+    };
+
+    // 3. Create host client
+    let host = crate::api::host::HostClient::new(&api_key)
+        .map_err(|e| format!("Failed to create host client: {e}"))?;
+
+    // 4. Find or create deployment
+    let deployment_id = match host
+        .find_deployment_by_name(name)
+        .await
+        .map_err(|e| format!("Failed to list deployments: {e}"))?
+    {
+        Some((id, _)) => {
+            eprintln!("Deployment \"{name}\" already exists, updating...");
+            id
+        }
+        None => {
+            eprintln!("Creating deployment \"{name}\"...");
+            let d = host
+                .create_deployment(name, deployment_type)
+                .await
+                .map_err(|e| format!("Failed to create deployment: {e}"))?;
+            d.get("id")
+                .and_then(|i| i.as_str())
+                .ok_or_else(|| "No id in create response".to_string())?
+                .to_string()
+        }
+    };
+
+    // 5. Build image (unless --image provided)
+    let local_tag = if let Some(img) = image {
+        img.to_string()
+    } else {
+        let tag = format!("ailsd-deploy-{name}:latest");
+        eprintln!("Building Docker image ({tag})...");
+        build(
+            config,
+            &tag,
+            true,
+            base_image,
+            api_version,
+            None,
+            None,
+            &[],
+        )?;
+        tag
+    };
+
+    // 6. Get push token
+    eprintln!("Getting push credentials...");
+    let token_resp = host
+        .get_push_token(&deployment_id)
+        .await
+        .map_err(|e| format!("Failed to get push token: {e}"))?;
+
+    // 7. Docker login
+    let registry_host = token_resp
+        .registry_url
+        .split('/')
+        .next()
+        .unwrap_or(&token_resp.registry_url);
+
+    let login_status = Command::new("docker")
+        .args(["login", "-u", "oauth2accesstoken", "--password-stdin", registry_host])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(token_resp.token.as_bytes())?;
+            }
+            drop(child.stdin.take());
+            child.wait()
+        })
+        .map_err(|e| format!("docker login failed: {e}"))?;
+
+    if !login_status.success() {
+        return Err("docker login failed".to_string());
+    }
+
+    // 8. Tag and push
+    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let remote_tag = format!("{}/{}:{timestamp}", token_resp.registry_url, name);
+
+    eprintln!("Pushing image to {remote_tag}...");
+    crate::deploy::exec::run_command("docker", &["tag", &local_tag, &remote_tag], None, false)?;
+    crate::deploy::exec::run_command("docker", &["push", &remote_tag], None, true)?;
+
+    // 9. Trigger revision
+    eprintln!("Triggering deployment revision...");
+    host.patch_deployment(&deployment_id, &remote_tag)
+        .await
+        .map_err(|e| format!("Failed to update deployment: {e}"))?;
+
+    eprintln!("Deployed successfully!");
+
+    Ok(())
+}
+
 /// Create a new LangGraph project from a template.
 pub fn new(_path: Option<&str>, _template: Option<&str>) -> Result<(), String> {
     // Placeholder for template creation

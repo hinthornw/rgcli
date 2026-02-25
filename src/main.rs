@@ -328,8 +328,32 @@ enum Command {
         template: Option<String>,
     },
 
-    /// Deploy to LangSmith (cloud)
-    Deploy,
+    /// Deploy to LangSmith cloud
+    Deploy {
+        /// Path to configuration file
+        #[arg(short, long, default_value = "langgraph.json")]
+        config: String,
+
+        /// Deployment name
+        #[arg(short, long)]
+        name: String,
+
+        /// Deployment type (dev or prod)
+        #[arg(long, default_value = "dev")]
+        deployment_type: String,
+
+        /// Base image for the API server
+        #[arg(long)]
+        base_image: Option<String>,
+
+        /// API version of the server
+        #[arg(long)]
+        api_version: Option<String>,
+
+        /// Pre-built image to push (skip building)
+        #[arg(long)]
+        image: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -795,8 +819,27 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Some(Command::Deploy) => {
-            println!("Cloud deployment coming soon. Use `ailsd up` for local Docker deployment.");
+        Some(Command::Deploy {
+            config,
+            name,
+            deployment_type,
+            base_image,
+            api_version,
+            image,
+        }) => {
+            let result = commands::deployment::deploy(
+                &config,
+                &name,
+                &deployment_type,
+                base_image.as_deref(),
+                api_version.as_deref(),
+                image.as_deref(),
+            )
+            .await;
+            if let Err(err) = result {
+                eprintln!("{}", print_error(&err));
+                std::process::exit(1);
+            }
             return Ok(());
         }
         None => {}

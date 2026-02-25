@@ -2,7 +2,7 @@ use std::io::{stdout, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveToColumn, MoveUp, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::{execute, queue};
@@ -84,10 +84,10 @@ fn prompt_message() -> Result<InputOutcome> {
     let mut show_complete = false;
     let mut completion_idx = 0usize;
     let mut completions: Vec<usize> = Vec::new();
+    let mut last_rendered_lines = 0u16;
 
-    let origin = crossterm::cursor::position().unwrap_or((0, 0));
     render_input(
-        origin,
+        &mut last_rendered_lines,
         &textarea,
         ctrl_c_at.is_some(),
         &completions,
@@ -100,7 +100,7 @@ fn prompt_message() -> Result<InputOutcome> {
             if start.elapsed() > CTRL_C_TIMEOUT {
                 ctrl_c_at = None;
                 render_input(
-                    origin,
+                    &mut last_rendered_lines,
                     &textarea,
                     ctrl_c_at.is_some(),
                     &completions,
@@ -130,7 +130,7 @@ fn prompt_message() -> Result<InputOutcome> {
                 )? {
                     update_completions(&textarea, &mut completions, &mut show_complete);
                     render_input(
-                        origin,
+                        &mut last_rendered_lines,
                         &textarea,
                         ctrl_c_at.is_some(),
                         &completions,
@@ -143,11 +143,13 @@ fn prompt_message() -> Result<InputOutcome> {
                 match key.code {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         if ctrl_c_at.is_some() {
+                            clear_rendered(&mut last_rendered_lines)?;
                             return Ok(InputOutcome::Quit);
                         }
                         ctrl_c_at = Some(Instant::now());
                     }
                     KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        clear_rendered(&mut last_rendered_lines)?;
                         return Ok(InputOutcome::Quit);
                     }
                     KeyCode::Enter => {
@@ -161,15 +163,14 @@ fn prompt_message() -> Result<InputOutcome> {
                                 continue;
                             }
                             if value == "/quit" || value == "/exit" {
+                                clear_rendered(&mut last_rendered_lines)?;
                                 return Ok(InputOutcome::Quit);
                             }
                             if value == "/configure" {
+                                clear_rendered(&mut last_rendered_lines)?;
                                 return Ok(InputOutcome::Configure);
                             }
-                            // Clear rendered input before returning
-                            let mut out = stdout();
-                            queue!(out, MoveTo(origin.0, origin.1), Clear(ClearType::FromCursorDown))?;
-                            out.flush()?;
+                            clear_rendered(&mut last_rendered_lines)?;
                             return Ok(InputOutcome::Message(value));
                         }
                     }
@@ -193,7 +194,7 @@ fn prompt_message() -> Result<InputOutcome> {
 
                 update_completions(&textarea, &mut completions, &mut show_complete);
                 render_input(
-                    origin,
+                    &mut last_rendered_lines,
                     &textarea,
                     ctrl_c_at.is_some(),
                     &completions,
@@ -203,7 +204,7 @@ fn prompt_message() -> Result<InputOutcome> {
             }
             Event::Resize(_, _) => {
                 render_input(
-                    origin,
+                    &mut last_rendered_lines,
                     &textarea,
                     ctrl_c_at.is_some(),
                     &completions,
@@ -276,8 +277,23 @@ fn handle_completion_keys(
     }
 }
 
+/// Clear the previously rendered input area by moving up and clearing lines.
+fn clear_rendered(last_rendered_lines: &mut u16) -> Result<()> {
+    let mut out = stdout();
+    if *last_rendered_lines > 0 {
+        queue!(out, MoveToColumn(0))?;
+        if *last_rendered_lines > 1 {
+            queue!(out, MoveUp(*last_rendered_lines - 1))?;
+        }
+        queue!(out, Clear(ClearType::FromCursorDown))?;
+        out.flush()?;
+    }
+    *last_rendered_lines = 0;
+    Ok(())
+}
+
 fn render_input(
-    origin: (u16, u16),
+    last_rendered_lines: &mut u16,
     textarea: &TextArea,
     ctrl_c_armed: bool,
     completions: &[usize],
@@ -285,7 +301,15 @@ fn render_input(
     show_complete: bool,
 ) -> Result<()> {
     let mut out = stdout();
-    queue!(out, MoveTo(origin.0, origin.1), Clear(ClearType::FromCursorDown))?;
+
+    // Move back to the start of the previously rendered area
+    if *last_rendered_lines > 0 {
+        queue!(out, MoveToColumn(0))?;
+        if *last_rendered_lines > 1 {
+            queue!(out, MoveUp(*last_rendered_lines - 1))?;
+        }
+        queue!(out, Clear(ClearType::FromCursorDown))?;
+    }
 
     let term_width = terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
     let prompt_len = PROMPT.len();
@@ -327,38 +351,51 @@ fn render_input(
     let visible_lines = total_lines.min(MAX_INPUT_LINES);
     let indent = " ".repeat(prompt_len);
     let is_empty = textarea.is_empty();
+
+    let mut total_output_lines = 0u16;
+
     for i in 0..visible_lines {
         let line = &display_lines[start + i];
         let prefix = if i == 0 { user_prompt() } else { indent.clone() };
         if is_empty && i == 0 {
-            writeln!(out, "{}{}", prefix, system_text(PLACEHOLDER))?;
+            // In raw mode, \n doesn't do \r, so use \r\n
+            write!(out, "{}{}\r\n", prefix, system_text(PLACEHOLDER))?;
         } else {
-            writeln!(out, "{}{}", prefix, line)?;
+            write!(out, "{}{}\r\n", prefix, line)?;
         }
+        total_output_lines += 1;
     }
 
     if show_complete && !completions.is_empty() {
-        writeln!(out)?;
+        write!(out, "\r\n")?;
+        total_output_lines += 1;
         for (i, idx) in completions.iter().enumerate() {
             let cmd = &SLASH_COMMANDS[*idx];
             if i == completion_idx {
-                writeln!(out, "{} {}", system_text(&format!("-> {}", cmd.name)), cmd.desc)?;
+                write!(out, "{} {}\r\n", system_text(&format!("-> {}", cmd.name)), cmd.desc)?;
             } else {
-                writeln!(out, "  {} {}", cmd.name, cmd.desc)?;
+                write!(out, "  {} {}\r\n", cmd.name, cmd.desc)?;
             }
+            total_output_lines += 1;
         }
     }
 
     if ctrl_c_armed {
-        writeln!(out, "\n{}", system_text("Press Ctrl+C again to exit"))?;
+        write!(out, "\r\n{}\r\n", system_text("Press Ctrl+C again to exit"))?;
+        total_output_lines += 2;
     }
 
+    *last_rendered_lines = total_output_lines;
+
+    // Position cursor within the input area
+    // We need to move up from current position to the correct row, then set column
     let display_row = cursor_display_row.saturating_sub(start);
-    let display_col = cursor_display_col;
-    queue!(
-        out,
-        MoveTo(origin.0 + (prompt_len + display_col) as u16, origin.1 + display_row as u16)
-    )?;
+    let lines_from_bottom = total_output_lines.saturating_sub(1) - display_row as u16;
+    if lines_from_bottom > 0 {
+        queue!(out, MoveUp(lines_from_bottom))?;
+    }
+    queue!(out, MoveToColumn((prompt_len + cursor_display_col) as u16))?;
+
     out.flush()?;
     Ok(())
 }

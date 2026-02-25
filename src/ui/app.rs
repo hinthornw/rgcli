@@ -224,6 +224,15 @@ impl TuiApp {
                 self.thread_id = tid.clone();
                 self.chat.load_thread_history(&self.client, tid);
             }
+            ScreenContext::Assistant(id) => {
+                self.chat.assistant_id = id.clone();
+                self.chat
+                    .messages
+                    .push(super::chat::ChatMessage::System(format!(
+                        "Switched to assistant: {id}"
+                    )));
+                self.chat.auto_scroll = true;
+            }
         }
     }
 

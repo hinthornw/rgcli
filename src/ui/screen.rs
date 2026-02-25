@@ -50,6 +50,7 @@ impl Screen {
 #[derive(Debug, Clone)]
 pub enum ScreenContext {
     Thread(String),
+    Assistant(String),
 }
 
 pub enum ScreenAction {

@@ -206,6 +206,23 @@ impl Client {
         Ok(resp.json::<Thread>().await?)
     }
 
+    pub async fn get_assistant_versions(
+        &self,
+        assistant_id: &str,
+    ) -> Result<Vec<serde_json::Value>> {
+        let url = format!("{}/assistants/{}/versions", self.endpoint, assistant_id);
+        let resp = self.post_json(&url, &serde_json::json!({})).await?;
+        Ok(resp
+            .as_array()
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub async fn get_assistant_graph(&self, assistant_id: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/assistants/{}/graph", self.endpoint, assistant_id);
+        self.get_json(&url).await
+    }
+
     pub async fn get_thread_state(&self, thread_id: &str) -> Result<ThreadState> {
         let url = format!("{}/threads/{}/state", self.endpoint, thread_id);
         let resp = self

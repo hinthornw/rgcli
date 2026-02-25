@@ -274,6 +274,31 @@ fn find_uvx() -> Option<String> {
     None
 }
 
+/// Install uv via the official installer script.
+fn install_uv() -> Result<(), String> {
+    eprintln!("Installing uv...");
+    let status = Command::new("sh")
+        .args(["-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"])
+        .status()
+        .map_err(|e| format!("Failed to run uv installer: {e}"))?;
+    if !status.success() {
+        return Err("uv installation failed".to_string());
+    }
+    // The installer puts uv in ~/.local/bin or ~/.cargo/bin — add to current PATH
+    if let Ok(home) = std::env::var("HOME") {
+        let current = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: single-threaded at this point (before tokio spawns), no other threads reading env
+        unsafe {
+            std::env::set_var(
+                "PATH",
+                format!("{home}/.local/bin:{home}/.cargo/bin:{current}"),
+            );
+        }
+    }
+    eprintln!("uv installed successfully.");
+    Ok(())
+}
+
 /// Find the Python interpreter, preferring python3 over python.
 fn find_python() -> Result<String, String> {
     for candidate in &["python3", "python"] {
@@ -327,29 +352,44 @@ pub fn dev(
         eprintln!("Using {uvx} for automatic dependency management...");
         RunMode::Uvx(uvx)
     } else {
-        let python = find_python()?;
-        // Pre-check that langgraph_api is importable
-        let check = Command::new(&python)
-            .args(["-c", "from langgraph_api.cli import run_server"])
-            .output();
-        match check {
-            Ok(output) if !output.status.success() => {
-                return Err("Required package 'langgraph-api' is not installed.\n\
-                     Install uv for automatic setup: https://docs.astral.sh/uv/\n\
-                     Or install manually: pip install -U \"langgraph-cli[inmem]\"\n\n\
-                     Note: The in-mem server requires Python 3.11 or higher."
-                    .to_string());
+        // No uv/uvx found — check if python+langgraph works, otherwise offer to install uv
+        let python_ok = find_python().ok().and_then(|python| {
+            let check = Command::new(&python)
+                .args(["-c", "from langgraph_api.cli import run_server"])
+                .output();
+            match check {
+                Ok(output) if output.status.success() => Some(python),
+                _ => None,
             }
-            Err(_) => {
-                return Err(format!(
-                    "Failed to run {python}. Install uv for automatic setup: \
-                     https://docs.astral.sh/uv/\n\
-                     Or install manually: pip install -U \"langgraph-cli[inmem]\""
-                ));
+        });
+
+        if let Some(python) = python_ok {
+            RunMode::Python(python)
+        } else {
+            // Offer to install uv
+            eprintln!("uv is required for `ailsd dev` but was not found.");
+            eprint!("Install uv now? [Y/n] ");
+            let mut input = String::new();
+            std::io::stdin()
+                .read_line(&mut input)
+                .map_err(|e| format!("Failed to read input: {e}"))?;
+            if matches!(input.trim(), "" | "y" | "Y" | "yes" | "Yes") {
+                install_uv()?;
+                if let Some(uvx) = find_uvx() {
+                    RunMode::Uvx(uvx)
+                } else {
+                    return Err(
+                        "uv was installed but uvx was not found on PATH. \
+                         Restart your shell and try again."
+                            .to_string(),
+                    );
+                }
+            } else {
+                return Err(
+                    "uv is required. Install manually: https://docs.astral.sh/uv/".to_string(),
+                );
             }
-            _ => {}
         }
-        RunMode::Python(python)
     };
 
     // Build a JSON config object to pass via stdin.

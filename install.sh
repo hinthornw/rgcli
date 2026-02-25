@@ -5,7 +5,7 @@ set -e
 
 REPO="hinthornw/ailsd"
 BINARY="ailsd"
-INSTALL_DIR="${AILSD_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${AILSD_INSTALL_DIR:-$HOME/.local/bin}"
 
 main() {
     need_cmd curl
@@ -38,16 +38,68 @@ main() {
 
     chmod +x "${tmp}/${BINARY}"
 
-    if [ -w "$INSTALL_DIR" ]; then
-        mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    else
-        echo "Installing to ${INSTALL_DIR} (requires sudo)..."
-        sudo mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    fi
+    # Ensure install directory exists
+    mkdir -p "$INSTALL_DIR"
+    mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 
     echo ""
     echo "${BINARY} ${version} installed to ${INSTALL_DIR}/${BINARY}"
+
+    # Add to PATH if needed
+    ensure_path
+
+    echo ""
     echo "Run '${BINARY}' to get started."
+}
+
+ensure_path() {
+    # Check if INSTALL_DIR is already on PATH
+    case ":$PATH:" in
+        *":${INSTALL_DIR}:"*) return ;;
+    esac
+
+    local export_line="export PATH=\"\$HOME/.local/bin:\$PATH\""
+    local rc_file=""
+
+    # Detect shell rc file
+    local shell_name
+    shell_name="$(basename "${SHELL:-/bin/sh}")"
+    case "$shell_name" in
+        zsh)  rc_file="$HOME/.zshrc" ;;
+        bash)
+            if [ -f "$HOME/.bashrc" ]; then
+                rc_file="$HOME/.bashrc"
+            elif [ -f "$HOME/.bash_profile" ]; then
+                rc_file="$HOME/.bash_profile"
+            else
+                rc_file="$HOME/.bashrc"
+            fi
+            ;;
+        fish)
+            # fish uses a different syntax
+            local fish_config="$HOME/.config/fish/config.fish"
+            mkdir -p "$(dirname "$fish_config")"
+            if ! grep -q '.local/bin' "$fish_config" 2>/dev/null; then
+                echo "" >> "$fish_config"
+                echo "fish_add_path \$HOME/.local/bin" >> "$fish_config"
+                echo "Added ~/.local/bin to PATH in ${fish_config}"
+                echo "Restart your shell or run: source ${fish_config}"
+            fi
+            return
+            ;;
+        *)    rc_file="$HOME/.profile" ;;
+    esac
+
+    # Check if already present in rc file
+    if [ -f "$rc_file" ] && grep -q '.local/bin' "$rc_file" 2>/dev/null; then
+        return
+    fi
+
+    echo "" >> "$rc_file"
+    echo "# Added by ailsd installer" >> "$rc_file"
+    echo "$export_line" >> "$rc_file"
+    echo "Added ~/.local/bin to PATH in ${rc_file}"
+    echo "Restart your shell or run: source ${rc_file}"
 }
 
 detect_os() {

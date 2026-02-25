@@ -241,29 +241,37 @@ pub async fn run_upgrade() -> Result<()> {
 
     println!("Installing...");
 
-    // Try direct rename first (works if same filesystem and we have write permission)
+    // Try direct copy first (works if we have write permission, e.g. ~/.local/bin)
+    // We use copy+rename instead of direct rename to handle cross-filesystem moves
     let backup = current_exe.with_extension("bak");
-    match fs::rename(&current_exe, &backup) {
-        Ok(()) => {
-            if let Err(e) = fs::rename(&binary_path, &current_exe) {
-                // Restore backup
-                let _ = fs::rename(&backup, &current_exe);
-                anyhow::bail!("failed to install new binary: {e}");
-            }
-            let _ = fs::remove_file(&backup);
+    let tmp_new = current_exe.with_extension("new");
+
+    if fs::copy(&binary_path, &tmp_new).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&tmp_new, fs::Permissions::from_mode(0o755));
         }
-        Err(_) => {
-            // Need elevated permissions
-            println!("Requires sudo to update {}...", current_exe.display());
-            let status = std::process::Command::new("sudo")
-                .args(["cp", "-f"])
-                .arg(&binary_path)
-                .arg(&current_exe)
-                .status()
-                .context("failed to run sudo")?;
-            if !status.success() {
-                anyhow::bail!("sudo install failed");
-            }
+        // Backup old, swap in new
+        let _ = fs::rename(&current_exe, &backup);
+        if let Err(e) = fs::rename(&tmp_new, &current_exe) {
+            let _ = fs::rename(&backup, &current_exe);
+            let _ = fs::remove_file(&tmp_new);
+            anyhow::bail!("failed to install new binary: {e}");
+        }
+        let _ = fs::remove_file(&backup);
+    } else {
+        // Need elevated permissions (e.g. /usr/local/bin)
+        println!("Requires sudo to update {}...", current_exe.display());
+        let _ = fs::remove_file(&tmp_new);
+        let status = std::process::Command::new("sudo")
+            .args(["cp", "-f"])
+            .arg(&binary_path)
+            .arg(&current_exe)
+            .status()
+            .context("failed to run sudo")?;
+        if !status.success() {
+            anyhow::bail!("sudo install failed");
         }
     }
 

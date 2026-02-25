@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "ailsd"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -303,6 +303,7 @@ checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
  "bitflags 2.10.0",
  "crossterm_winapi",
+ "futures-core",
  "mio 1.1.1",
  "parking_lot",
  "rustix 0.38.44",

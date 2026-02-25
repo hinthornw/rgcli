@@ -28,15 +28,30 @@ pub struct ContextConfig {
     pub contexts: HashMap<String, Config>,
 }
 
+const CHAT_LANGCHAIN_ENDPOINT: &str =
+    "https://chat-langchain-993a2fee078256ab879993a971197820.us.langgraph.app";
+
 fn default_context_name() -> String {
     "default".to_string()
+}
+
+/// Built-in default config: Chat Langchain (no auth required).
+pub fn builtin_default_config() -> Config {
+    Config {
+        endpoint: CHAT_LANGCHAIN_ENDPOINT.to_string(),
+        api_key: String::new(),
+        assistant_id: "agent".to_string(),
+        custom_headers: HashMap::new(),
+    }
 }
 
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             current_context: default_context_name(),
-            contexts: HashMap::new(),
+            contexts: HashMap::from([
+                ("default".to_string(), builtin_default_config()),
+            ]),
         }
     }
 }

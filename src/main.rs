@@ -6,6 +6,7 @@ mod ui;
 mod update;
 
 use std::collections::HashMap;
+use std::io::{self, IsTerminal, Read as _};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -16,15 +17,61 @@ use crate::config::Config;
 use crate::ui::{print_error, print_logo, system_text};
 
 #[derive(Parser, Debug)]
-#[command(name = "ailsd", about = "CLI for chatting with LangSmith deployments")]
+#[command(
+    name = "ailsd",
+    about = "CLI for chatting with LangGraph deployments",
+    long_about = "Chat with LangGraph deployments from the terminal.\n\n\
+        Works out of the box with Chat Langchain (Q&A over LangChain docs). \
+        Run 'ailsd context create <name>' to connect your own deployment.",
+    after_help = "\x1b[1mExamples:\x1b[0m
+  \x1b[2m# Interactive chat\x1b[0m
+  ailsd
+
+  \x1b[2m# Resume a previous thread\x1b[0m
+  ailsd --resume
+
+  \x1b[2m# Pipe mode (non-interactive, uses /runs/wait)\x1b[0m
+  echo \"what is langgraph?\" | ailsd
+  echo \"tell me more\" | ailsd --thread-id <id>
+  echo \"explain agents\" | ailsd --json | jq .
+
+  \x1b[2m# Chain with other tools\x1b[0m
+  cat README.md | ailsd
+  echo \"summarize this\" | ailsd | pbcopy
+
+  \x1b[2m# Manage contexts (like kubectl)\x1b[0m
+  ailsd context create production
+  ailsd context use production
+  ailsd context list
+
+  \x1b[2m# Local override via .ailsd.yaml in cwd\x1b[0m
+  echo 'endpoint: https://my-dev.langgraph.app' > .ailsd.yaml
+  ailsd  # uses local config
+
+\x1b[1mInteractive keys:\x1b[0m
+  Enter          Send message
+  Alt+Enter      Insert newline
+  Esc Esc        Cancel running response
+  Ctrl+C Ctrl+C  Quit
+  /quit          Quit
+  /configure     Reconfigure connection"
+)]
 struct Cli {
-    /// Resume an existing thread
+    /// Resume a previous chat thread
     #[arg(long)]
     resume: bool,
 
     /// Show version
     #[arg(long)]
     version: bool,
+
+    /// Thread ID to use (creates new thread if omitted)
+    #[arg(long, value_name = "ID")]
+    thread_id: Option<String>,
+
+    /// Output raw JSON instead of extracted text (pipe mode only)
+    #[arg(long)]
+    json: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -34,7 +81,15 @@ struct Cli {
 enum Command {
     /// Upgrade to the latest version
     Upgrade,
-    /// Manage deployment contexts
+    /// Manage deployment contexts (like kubectl config)
+    #[command(
+        after_help = "\x1b[1mExamples:\x1b[0m
+  ailsd context create staging
+  ailsd context use staging
+  ailsd context list
+  ailsd context show production
+  ailsd context delete old-context"
+    )]
     Context {
         #[command(subcommand)]
         action: ContextAction,
@@ -43,21 +98,33 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum ContextAction {
-    /// List all contexts
+    /// List all contexts (* marks active)
     List,
-    /// Show active context
+    /// Show which context is active and where it comes from
     Current,
-    /// Switch active context
-    Use { name: String },
-    /// Create a new context
-    Create { name: String },
-    /// Show context details
-    Show { name: Option<String> },
+    /// Switch the active context
+    Use {
+        /// Context name to switch to
+        name: String,
+    },
+    /// Create a new context interactively
+    Create {
+        /// Name for the new context
+        name: String,
+    },
+    /// Show context details (API key is masked)
+    Show {
+        /// Context name (defaults to active context)
+        name: Option<String>,
+    },
     /// Delete a context
-    Delete { name: String },
+    Delete {
+        /// Context name to delete
+        name: String,
+    },
 }
 
-const DEFAULT_ASSISTANT: &str = "docs_agent";
+const DEFAULT_ASSISTANT: &str = "agent";
 
 #[derive(Clone, Copy)]
 enum AuthOption {
@@ -127,6 +194,16 @@ async fn main() -> Result<()> {
         None => {}
     }
 
+    // Pipe mode: stdin is not a TTY
+    let is_pipe = !io::stdin().is_terminal();
+    if is_pipe {
+        if let Err(err) = run_pipe(cli.thread_id.as_deref(), cli.json).await {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
     if let Err(err) = run(cli.resume).await {
         eprintln!("{}", print_error(&err.to_string()));
         std::process::exit(1);
@@ -135,12 +212,51 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn run_pipe(thread_id: Option<&str>, json_output: bool) -> Result<()> {
+    let cfg = config::load().context("failed to load config (run `ailsd` interactively first to configure)")?;
+    let client = Client::new(&cfg)?;
+
+    // Read all of stdin
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let input = input.trim();
+    if input.is_empty() {
+        anyhow::bail!("no input provided on stdin");
+    }
+
+    // Create or reuse thread
+    let tid = match thread_id {
+        Some(id) => id.to_string(),
+        None => client.create_thread().await?.thread_id,
+    };
+
+    // Run and wait for result
+    let result = client.wait_run(&tid, &cfg.assistant_id, input).await?;
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        // Extract the last assistant message from the result
+        let messages = crate::api::get_messages(&result);
+        if let Some(last) = messages.iter().rev().find(|m| m.role == "assistant") {
+            print!("{}", last.content);
+        } else {
+            // Fallback: print raw JSON
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    // Print thread ID to stderr so it can be reused
+    eprintln!("thread_id={}", tid);
+
+    Ok(())
+}
+
 async fn run(resume: bool) -> Result<()> {
     if !config::exists() {
-        println!("Welcome to ailsd! Let's configure your first context.\n");
-        let cfg = run_configure_inner(None).context("configuration failed")?;
-        config::save_context("default", &cfg)?;
-        println!();
+        // Save the built-in default so config file exists for future runs
+        let default_cfg = config::ContextConfig::default();
+        config::save_context_config(&default_cfg)?;
     }
 
     let mut cfg = config::load().context("failed to load config")?;

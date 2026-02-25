@@ -59,3 +59,13 @@ pub fn is_end_event(event: &SseEvent) -> bool {
 pub fn is_message_event(event: &SseEvent) -> bool {
     matches!(event.event.as_str(), "messages" | "data")
 }
+
+pub fn is_metadata_event(event: &SseEvent) -> bool {
+    event.event == "metadata"
+}
+
+pub fn extract_run_id(event: &SseEvent) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(&event.data)
+        .ok()
+        .and_then(|v| v.get("run_id")?.as_str().map(String::from))
+}

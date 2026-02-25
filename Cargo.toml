@@ -1,13 +1,13 @@
 [package]
 name = "ailsd"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.82"
 bytes = "1.11.0"
 clap = { version = "4.5.30", features = ["derive"] }
-crossterm = "0.28.1"
+crossterm = { version = "0.28.1", features = ["event-stream"] }
 flate2 = "1.0"
 directories = "5.0.1"
 futures-util = "0.3.30"

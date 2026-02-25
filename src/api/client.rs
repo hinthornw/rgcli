@@ -1,12 +1,26 @@
 use anyhow::{Context, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT};
 use reqwest::StatusCode;
+use tokio::sync::mpsc;
 
-use crate::api::sse::{is_end_event, is_message_event, parse_sse, SseEvent};
+use crate::api::sse::{
+    extract_run_id, is_end_event, is_message_event, is_metadata_event, parse_sse, SseEvent,
+};
 use crate::api::types::{
     is_ai_chunk, message_chunk_content, new_run_request, parse_message_chunk, Thread, ThreadState,
 };
 use crate::config::Config;
+
+/// Events emitted by a streaming run.
+#[derive(Debug)]
+pub enum StreamEvent {
+    /// Run ID extracted from metadata event.
+    RunStarted(String),
+    /// A text token from the assistant.
+    Token(String),
+    /// Stream completed (Ok or Err).
+    Done(Result<()>),
+}
 
 #[derive(Clone)]
 pub struct Client {
@@ -109,18 +123,32 @@ impl Client {
         Ok(resp.json::<Thread>().await?)
     }
 
-    pub async fn stream_run<F>(
+    /// Start a streaming run, sending events through the provided channel.
+    /// This is meant to be called from a spawned task.
+    pub async fn stream_run(
         &self,
         thread_id: &str,
         assistant_id: &str,
         user_message: &str,
-        mut on_token: F,
-    ) -> Result<()>
-    where
-        F: FnMut(String),
-    {
+        multitask_strategy: Option<&str>,
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) {
+        let result = self
+            .stream_run_inner(thread_id, assistant_id, user_message, multitask_strategy, tx)
+            .await;
+        let _ = tx.send(StreamEvent::Done(result));
+    }
+
+    async fn stream_run_inner(
+        &self,
+        thread_id: &str,
+        assistant_id: &str,
+        user_message: &str,
+        multitask_strategy: Option<&str>,
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) -> Result<()> {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
-        let run_req = new_run_request(assistant_id, user_message);
+        let run_req = new_run_request(assistant_id, user_message, multitask_strategy);
         let resp = self
             .http
             .post(url)
@@ -137,19 +165,70 @@ impl Client {
         }
 
         let stream = resp.bytes_stream();
-        parse_sse(stream, |event| handle_sse(event, &mut on_token))
+        parse_sse(stream, |event| handle_sse(event, tx))
             .await
             .context("failed to parse SSE stream")?;
 
         Ok(())
     }
+
+    /// Run and wait for the final result (non-streaming). Returns raw JSON response.
+    pub async fn wait_run(
+        &self,
+        thread_id: &str,
+        assistant_id: &str,
+        user_message: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/threads/{}/runs/wait", self.endpoint, thread_id);
+        let run_req = new_run_request(assistant_id, user_message, None);
+        let resp = self
+            .http
+            .post(url)
+            .headers(self.headers.clone())
+            .json(&run_req)
+            .send()
+            .await?;
+
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("run failed: {} - {}", status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// Cancel a running run.
+    pub async fn cancel_run(&self, thread_id: &str, run_id: &str) -> Result<()> {
+        let url = format!(
+            "{}/threads/{}/runs/{}/cancel",
+            self.endpoint, thread_id, run_id
+        );
+        let resp = self
+            .http
+            .post(url)
+            .headers(self.headers.clone())
+            .body("{}")
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if status != StatusCode::OK && status != StatusCode::ACCEPTED {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("failed to cancel run: {} - {}", status, body);
+        }
+        Ok(())
+    }
 }
 
-fn handle_sse<F>(event: SseEvent, on_token: &mut F)
-where
-    F: FnMut(String),
-{
+fn handle_sse(event: SseEvent, tx: &mpsc::UnboundedSender<StreamEvent>) {
     if is_end_event(&event) {
+        return;
+    }
+    if is_metadata_event(&event) {
+        if let Some(run_id) = extract_run_id(&event) {
+            let _ = tx.send(StreamEvent::RunStarted(run_id));
+        }
         return;
     }
     if !is_message_event(&event) {
@@ -166,6 +245,6 @@ where
     }
     let content = message_chunk_content(&chunk);
     if !content.is_empty() {
-        on_token(content);
+        let _ = tx.send(StreamEvent::Token(content));
     }
 }

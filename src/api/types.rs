@@ -14,6 +14,8 @@ pub struct RunRequest {
     pub stream_mode: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub if_not_exists: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multitask_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +48,11 @@ pub struct MessageChunk {
     pub chunk_type: Option<String>,
 }
 
-pub fn new_run_request(assistant_id: &str, user_message: &str) -> RunRequest {
+pub fn new_run_request(
+    assistant_id: &str,
+    user_message: &str,
+    multitask_strategy: Option<&str>,
+) -> RunRequest {
     RunRequest {
         assistant_id: assistant_id.to_string(),
         input: serde_json::json!({
@@ -59,6 +65,7 @@ pub fn new_run_request(assistant_id: &str, user_message: &str) -> RunRequest {
         }),
         stream_mode: vec!["messages-tuple".to_string()],
         if_not_exists: Some("create".to_string()),
+        multitask_strategy: multitask_strategy.map(String::from),
     }
 }
 

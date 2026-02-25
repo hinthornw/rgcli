@@ -319,8 +319,8 @@ pub fn dev(
 
     // Determine how to run: prefer uvx for zero-install, fall back to direct python
     enum RunMode {
-        Uvx(String),     // uvx or uv binary path
-        Python(String),  // python3 or python binary
+        Uvx(String),    // uvx or uv binary path
+        Python(String), // python3 or python binary
     }
 
     let run_mode = if let Some(uvx) = find_uvx() {
@@ -425,9 +425,13 @@ run_server(
                 Command::new(bin)
             };
             cmd.args([
-                "--from", "langgraph-cli[inmem]",
-                "--python", "3.11",
-                "python", "-c", python_code,
+                "--from",
+                "langgraph-cli[inmem]",
+                "--python",
+                "3.11",
+                "python",
+                "-c",
+                python_code,
             ])
             .current_dir(work_dir)
             .stdin(std::process::Stdio::piped())
@@ -436,17 +440,15 @@ run_server(
             .spawn()
             .map_err(|e| format!("Failed to start uvx: {e}"))?
         }
-        RunMode::Python(python) => {
-            Command::new(python)
-                .arg("-c")
-                .arg(python_code)
-                .current_dir(work_dir)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .spawn()
-                .map_err(|e| format!("Failed to start Python: {e}"))?
-        }
+        RunMode::Python(python) => Command::new(python)
+            .arg("-c")
+            .arg(python_code)
+            .current_dir(work_dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("Failed to start Python: {e}"))?,
     };
 
     // Write JSON config to stdin
@@ -649,8 +651,10 @@ pub async fn deploy(
         let cfg = crate::config::load().ok();
         let from_cfg = cfg.as_ref().map(|c| c.api_key.clone()).unwrap_or_default();
         if from_cfg.is_empty() {
-            std::env::var("LANGSMITH_API_KEY")
-                .map_err(|_| "No API key found. Set LANGSMITH_API_KEY or configure with `ailsd context`".to_string())?
+            std::env::var("LANGSMITH_API_KEY").map_err(|_| {
+                "No API key found. Set LANGSMITH_API_KEY or configure with `ailsd context`"
+                    .to_string()
+            })?
         } else {
             from_cfg
         }
@@ -689,16 +693,7 @@ pub async fn deploy(
     } else {
         let tag = format!("ailsd-deploy-{name}:latest");
         eprintln!("Building Docker image ({tag})...");
-        build(
-            config,
-            &tag,
-            true,
-            base_image,
-            api_version,
-            None,
-            None,
-            &[],
-        )?;
+        build(config, &tag, true, base_image, api_version, None, None, &[])?;
         tag
     };
 
@@ -717,7 +712,13 @@ pub async fn deploy(
         .unwrap_or(&token_resp.registry_url);
 
     let login_status = Command::new("docker")
-        .args(["login", "-u", "oauth2accesstoken", "--password-stdin", registry_host])
+        .args([
+            "login",
+            "-u",
+            "oauth2accesstoken",
+            "--password-stdin",
+            registry_host,
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

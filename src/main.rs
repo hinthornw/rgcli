@@ -493,7 +493,6 @@ enum ContextAction {
     },
 }
 
-
 const DEFAULT_ASSISTANT: &str = "agent";
 
 #[derive(Clone, Copy)]

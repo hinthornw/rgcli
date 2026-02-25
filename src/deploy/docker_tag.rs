@@ -14,11 +14,7 @@ pub fn default_base_image(config: &Config) -> String {
 }
 
 /// Build the Docker image tag string.
-pub fn docker_tag(
-    config: &Config,
-    base_image: Option<&str>,
-    api_version: Option<&str>,
-) -> String {
+pub fn docker_tag(config: &Config, base_image: Option<&str>, api_version: Option<&str>) -> String {
     let api_version = api_version
         .map(|s| s.to_string())
         .or_else(|| config.api_version.clone());

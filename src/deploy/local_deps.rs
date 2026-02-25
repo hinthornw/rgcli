@@ -34,10 +34,7 @@ impl Default for LocalDeps {
 }
 
 /// Assemble local dependencies from config.
-pub fn assemble_local_deps(
-    config_path: &Path,
-    config: &Config,
-) -> Result<LocalDeps, String> {
+pub fn assemble_local_deps(config_path: &Path, config: &Config) -> Result<LocalDeps, String> {
     let config_path = config_path
         .canonicalize()
         .map_err(|e| format!("Could not resolve config path: {e}"))?;
@@ -49,7 +46,10 @@ pub fn assemble_local_deps(
         .collect();
     let mut counter: HashMap<String, usize> = HashMap::new();
 
-    let check_reserved = |name: &str, ref_str: &str, reserved: &mut HashSet<String>| -> Result<(), String> {
+    let check_reserved = |name: &str,
+                          ref_str: &str,
+                          reserved: &mut HashSet<String>|
+     -> Result<(), String> {
         if reserved.contains(name) {
             return Err(format!(
                 "Package name '{name}' used in local dep '{ref_str}' is reserved. Rename the directory."
@@ -72,10 +72,18 @@ pub fn assemble_local_deps(
 
         let resolved = (config_parent.join(local_dep))
             .canonicalize()
-            .map_err(|_| format!("Could not find local dependency: {}", config_parent.join(local_dep).display()))?;
+            .map_err(|_| {
+                format!(
+                    "Could not find local dependency: {}",
+                    config_parent.join(local_dep).display()
+                )
+            })?;
 
         if !resolved.exists() {
-            return Err(format!("Could not find local dependency: {}", resolved.display()));
+            return Err(format!(
+                "Could not find local dependency: {}",
+                resolved.display()
+            ));
         }
         if !resolved.is_dir() {
             return Err(format!(
@@ -90,18 +98,17 @@ pub fn assemble_local_deps(
 
         let files: Vec<String> = std::fs::read_dir(&resolved)
             .map_err(|e| format!("Could not read directory {}: {e}", resolved.display()))?
-            .filter_map(|entry| entry.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+            })
             .collect();
 
-        if files.contains(&"pyproject.toml".to_string())
-            || files.contains(&"setup.py".to_string())
+        if files.contains(&"pyproject.toml".to_string()) || files.contains(&"setup.py".to_string())
         {
             // Real package
-            let dir_name = resolved
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let dir_name = resolved.file_name().unwrap().to_string_lossy().to_string();
             let count = counter.entry(dir_name.clone()).or_insert(0);
             let container_name = if *count > 0 {
                 format!("{}_{}", dir_name, count)
@@ -110,18 +117,17 @@ pub fn assemble_local_deps(
             };
             *count += 1;
 
-            real_pkgs.insert(resolved.clone(), (local_dep.clone(), container_name.clone()));
+            real_pkgs.insert(
+                resolved.clone(),
+                (local_dep.clone(), container_name.clone()),
+            );
 
             if local_dep == "." {
                 working_dir = Some(format!("/deps/{container_name}"));
             }
         } else {
             // Faux package
-            let dir_name = resolved
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let dir_name = resolved.file_name().unwrap().to_string_lossy().to_string();
 
             if files.contains(&"__init__.py".to_string()) {
                 // Flat layout
@@ -133,7 +139,10 @@ pub fn assemble_local_deps(
                 }
                 check_reserved(&dir_name, local_dep, &mut reserved)?;
                 let container_path = format!("/deps/outer-{dir_name}/{dir_name}");
-                faux_pkgs.insert(resolved.clone(), (local_dep.clone(), container_path.clone()));
+                faux_pkgs.insert(
+                    resolved.clone(),
+                    (local_dep.clone(), container_path.clone()),
+                );
                 if local_dep == "." {
                     working_dir = Some(container_path);
                 }
@@ -156,7 +165,10 @@ pub fn assemble_local_deps(
                     }
                 }
 
-                faux_pkgs.insert(resolved.clone(), (local_dep.clone(), container_path.clone()));
+                faux_pkgs.insert(
+                    resolved.clone(),
+                    (local_dep.clone(), container_path.clone()),
+                );
                 if local_dep == "." {
                     working_dir = Some(container_path);
                 }

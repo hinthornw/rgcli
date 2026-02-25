@@ -59,7 +59,12 @@ impl Client {
 
     /// Generic GET returning JSON.
     pub async fn get_json(&self, url: &str) -> Result<serde_json::Value> {
-        let resp = self.http.get(url).headers(self.headers.clone()).send().await?;
+        let resp = self
+            .http
+            .get(url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
         if resp.status() != StatusCode::OK {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -69,8 +74,18 @@ impl Client {
     }
 
     /// Generic POST returning JSON.
-    pub async fn post_json(&self, url: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-        let resp = self.http.post(url).headers(self.headers.clone()).json(body).send().await?;
+    pub async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .post(url)
+            .headers(self.headers.clone())
+            .json(body)
+            .send()
+            .await?;
         if resp.status() != StatusCode::OK && resp.status() != StatusCode::CREATED {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -81,7 +96,13 @@ impl Client {
 
     /// Generic PUT.
     pub async fn put_json(&self, url: &str, body: &serde_json::Value) -> Result<()> {
-        let resp = self.http.put(url).headers(self.headers.clone()).json(body).send().await?;
+        let resp = self
+            .http
+            .put(url)
+            .headers(self.headers.clone())
+            .json(body)
+            .send()
+            .await?;
         if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -92,8 +113,16 @@ impl Client {
 
     /// Generic DELETE by URL.
     pub async fn delete_url(&self, url: &str) -> Result<()> {
-        let resp = self.http.delete(url).headers(self.headers.clone()).send().await?;
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT && resp.status() != StatusCode::ACCEPTED {
+        let resp = self
+            .http
+            .delete(url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        if resp.status() != StatusCode::OK
+            && resp.status() != StatusCode::NO_CONTENT
+            && resp.status() != StatusCode::ACCEPTED
+        {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("DELETE {} failed: {} - {}", url, status, body);
@@ -103,7 +132,13 @@ impl Client {
 
     /// DELETE with JSON body.
     pub async fn delete_json(&self, url: &str, body: &serde_json::Value) -> Result<()> {
-        let resp = self.http.delete(url).headers(self.headers.clone()).json(body).send().await?;
+        let resp = self
+            .http
+            .delete(url)
+            .headers(self.headers.clone())
+            .json(body)
+            .send()
+            .await?;
         if resp.status() != StatusCode::OK && resp.status() != StatusCode::NO_CONTENT {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -226,8 +261,13 @@ impl Client {
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) {
         let url = format!("{}/threads/{}/runs/stream", self.endpoint, thread_id);
-        let run_req =
-            new_run_request_with_attachments(assistant_id, user_message, attachments, None, stream_mode);
+        let run_req = new_run_request_with_attachments(
+            assistant_id,
+            user_message,
+            attachments,
+            None,
+            stream_mode,
+        );
         let result = self.do_stream(&url, &run_req, tx).await;
         let _ = tx.send(StreamEvent::Done(result));
     }

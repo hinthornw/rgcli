@@ -24,10 +24,7 @@ pub async fn list(client: &Client) -> Result<()> {
             .unwrap_or("-");
         let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("-");
         let graph = a.get("graph_id").and_then(|v| v.as_str()).unwrap_or("-");
-        let updated = a
-            .get("updated_at")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
+        let updated = a.get("updated_at").and_then(|v| v.as_str()).unwrap_or("-");
         table.add_row(vec![
             Cell::new(id).fg(Color::Cyan),
             Cell::new(name),
@@ -111,14 +108,12 @@ fn render_ascii_graph(graph: &serde_json::Value) -> Result<()> {
         .collect();
 
     // Sort to ensure __start__ is first and __end__ is last
-    node_ids.sort_by(|a, b| {
-        match (a.as_str(), b.as_str()) {
-            ("__start__", _) => std::cmp::Ordering::Less,
-            (_, "__start__") => std::cmp::Ordering::Greater,
-            ("__end__", _) => std::cmp::Ordering::Greater,
-            (_, "__end__") => std::cmp::Ordering::Less,
-            _ => a.cmp(b),
-        }
+    node_ids.sort_by(|a, b| match (a.as_str(), b.as_str()) {
+        ("__start__", _) => std::cmp::Ordering::Less,
+        (_, "__start__") => std::cmp::Ordering::Greater,
+        ("__end__", _) => std::cmp::Ordering::Greater,
+        (_, "__end__") => std::cmp::Ordering::Less,
+        _ => a.cmp(b),
     });
 
     // Render each node and its outgoing edges
@@ -187,11 +182,7 @@ pub async fn schemas(client: &Client, assistant_id: &str) -> Result<()> {
 }
 
 pub async fn versions(client: &Client, assistant_id: &str) -> Result<()> {
-    let url = format!(
-        "{}/assistants/{}/versions",
-        client.endpoint(),
-        assistant_id
-    );
+    let url = format!("{}/assistants/{}/versions", client.endpoint(), assistant_id);
     let resp = client.post_json(&url, &serde_json::json!({})).await?;
     if let Some(arr) = resp.as_array() {
         let mut table = Table::new();
@@ -202,10 +193,7 @@ pub async fn versions(client: &Client, assistant_id: &str) -> Result<()> {
                 .and_then(|v| v.as_i64())
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "-".to_string());
-            let created = v
-                .get("created_at")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let created = v.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
             table.add_row(vec![version, created.to_string()]);
         }
         println!("{table}");

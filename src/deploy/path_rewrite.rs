@@ -21,9 +21,7 @@ pub fn update_graph_paths(
                     if let Some(path_val) = m.get("path") {
                         path_val
                             .as_str()
-                            .ok_or_else(|| {
-                                format!("Graph '{graph_id}' path must be a string")
-                            })?
+                            .ok_or_else(|| format!("Graph '{graph_id}' path must be a string"))?
                             .to_string()
                     } else {
                         return Err(format!(
@@ -45,16 +43,24 @@ pub fn update_graph_paths(
 
         // Check for file path (contains / or \)
         if module_str.contains('/') || module_str.contains('\\') {
-            let resolved = config_parent
-                .join(module_str)
-                .canonicalize()
-                .map_err(|_| format!("Could not find local module: {}", config_parent.join(module_str).display()))?;
+            let resolved = config_parent.join(module_str).canonicalize().map_err(|_| {
+                format!(
+                    "Could not find local module: {}",
+                    config_parent.join(module_str).display()
+                )
+            })?;
 
             if !resolved.exists() {
-                return Err(format!("Could not find local module: {}", resolved.display()));
+                return Err(format!(
+                    "Could not find local module: {}",
+                    resolved.display()
+                ));
             }
             if !resolved.is_file() {
-                return Err(format!("Local module must be a file: {}", resolved.display()));
+                return Err(format!(
+                    "Local module must be a file: {}",
+                    resolved.display()
+                ));
             }
 
             let mut new_module = None;
@@ -63,8 +69,11 @@ pub fn update_graph_paths(
             for (path, (_, container_name)) in &local_deps.real_pkgs {
                 if resolved.starts_with(path) {
                     if let Ok(relative) = resolved.strip_prefix(path) {
-                        let container_path =
-                            format!("/deps/{}/{}", container_name, relative.to_string_lossy().replace('\\', "/"));
+                        let container_path = format!(
+                            "/deps/{}/{}",
+                            container_name,
+                            relative.to_string_lossy().replace('\\', "/")
+                        );
                         new_module = Some(container_path);
                         break;
                     }
@@ -126,10 +135,12 @@ pub fn update_auth_path(
     }
 
     let config_parent = config_path.parent().unwrap();
-    let resolved = config_parent
-        .join(module_str)
-        .canonicalize()
-        .map_err(|_| format!("Auth file not found: {} (from {path_str})", config_parent.join(module_str).display()))?;
+    let resolved = config_parent.join(module_str).canonicalize().map_err(|_| {
+        format!(
+            "Auth file not found: {} (from {path_str})",
+            config_parent.join(module_str).display()
+        )
+    })?;
 
     if !resolved.is_file() {
         return Err(format!("Auth path must be a file: {}", resolved.display()));
@@ -196,15 +207,12 @@ pub fn update_encryption_path(
     }
 
     let config_parent = config_path.parent().unwrap();
-    let resolved = config_parent
-        .join(module_str)
-        .canonicalize()
-        .map_err(|_| {
-            format!(
-                "Encryption file not found: {} (from {path_str})",
-                config_parent.join(module_str).display()
-            )
-        })?;
+    let resolved = config_parent.join(module_str).canonicalize().map_err(|_| {
+        format!(
+            "Encryption file not found: {} (from {path_str})",
+            config_parent.join(module_str).display()
+        )
+    })?;
 
     if !resolved.is_file() {
         return Err(format!(
@@ -276,10 +284,12 @@ pub fn update_http_app_path(
     }
 
     let config_parent = config_path.parent().unwrap();
-    let resolved = config_parent
-        .join(module_str)
-        .canonicalize()
-        .map_err(|_| format!("Could not find HTTP app module: {}", config_parent.join(module_str).display()))?;
+    let resolved = config_parent.join(module_str).canonicalize().map_err(|_| {
+        format!(
+            "Could not find HTTP app module: {}",
+            config_parent.join(module_str).display()
+        )
+    })?;
 
     if !resolved.is_file() {
         return Err(format!(

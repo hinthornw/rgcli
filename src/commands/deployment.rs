@@ -158,7 +158,9 @@ pub fn up(
                 println!("\nReady!");
                 println!("  - API: http://localhost:{port}");
                 println!("  - Docs: http://localhost:{port}/docs");
-                println!("  - LangGraph Studio: {debugger_origin}/studio/?baseUrl={debugger_base_url_query}");
+                println!(
+                    "  - LangGraph Studio: {debugger_origin}/studio/?baseUrl={debugger_base_url_query}"
+                );
             }
         },
     )?;
@@ -189,7 +191,8 @@ pub fn build(
 
     // Pull latest images if requested
     if pull {
-        let image_tag = crate::deploy::docker_tag::docker_tag(&config_json, base_image, api_version);
+        let image_tag =
+            crate::deploy::docker_tag::docker_tag(&config_json, base_image, api_version);
         eprintln!("Pulling images...");
         crate::deploy::exec::run_command("docker", &["pull", &image_tag], None, true)?;
     }
@@ -197,8 +200,7 @@ pub fn build(
     eprintln!("Building...");
 
     // Determine build context
-    let is_js_project =
-        config_json.node_version.is_some() && config_json.python_version.is_none();
+    let is_js_project = config_json.node_version.is_some() && config_json.python_version.is_none();
 
     // For JS projects with install/build commands, use CWD; otherwise use config parent
     let build_context = if is_js_project && (build_command.is_some() || install_command.is_some()) {
@@ -250,7 +252,12 @@ pub fn build(
 
     // Run docker build with streaming output
     let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    crate::deploy::exec::run_command_streaming("docker", &args_refs, Some(&dockerfile_content), true)?;
+    crate::deploy::exec::run_command_streaming(
+        "docker",
+        &args_refs,
+        Some(&dockerfile_content),
+        true,
+    )?;
 
     eprintln!("Successfully built image: {tag}");
 
@@ -310,13 +317,11 @@ pub fn dev(
 
     match check {
         Ok(output) if !output.status.success() => {
-            return Err(
-                "Required package 'langgraph-api' is not installed.\n\
+            return Err("Required package 'langgraph-api' is not installed.\n\
                  Please install it with:\n\n\
                      pip install -U \"langgraph-cli[inmem]\"\n\n\
                  Note: The in-mem server requires Python 3.11 or higher."
-                    .to_string(),
-            );
+                .to_string());
         }
         Err(_) => {
             return Err(format!(
@@ -392,11 +397,7 @@ run_server(
     let mut child = Command::new(&python)
         .arg("-c")
         .arg(python_code)
-        .current_dir(
-            config_path
-                .parent()
-                .unwrap_or_else(|| Path::new(".")),
-        )
+        .current_dir(config_path.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
@@ -490,9 +491,7 @@ pub fn dockerfile(
     let abs_save_path = if save_path.is_absolute() {
         save_path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(save_path)
+        std::env::current_dir().unwrap_or_default().join(save_path)
     };
 
     eprintln!("Validating configuration at path: {config}");
@@ -500,10 +499,7 @@ pub fn dockerfile(
     let mut config_json = crate::deploy::config::validate_config_file(config_path)?;
     eprintln!("Configuration validated!");
 
-    eprintln!(
-        "Generating Dockerfile at {}",
-        abs_save_path.display()
-    );
+    eprintln!("Generating Dockerfile at {}", abs_save_path.display());
 
     let (dockerfile_content, additional_contexts) = crate::deploy::docker::config_to_docker(
         config_path,
@@ -579,10 +575,7 @@ pub fn dockerfile(
 
     eprintln!(
         "Files generated successfully at path {}!",
-        abs_save_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .display()
+        abs_save_path.parent().unwrap_or(Path::new(".")).display()
     );
 
     Ok(())

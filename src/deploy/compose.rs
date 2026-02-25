@@ -63,7 +63,10 @@ pub fn debugger_compose(port: Option<u16>, base_url: Option<&str>) -> IndexMap<S
         "condition".to_string(),
         YamlValue::String("service_healthy".to_string()),
     );
-    depends.insert("langgraph-postgres".to_string(), YamlValue::Dict(pg_condition));
+    depends.insert(
+        "langgraph-postgres".to_string(),
+        YamlValue::Dict(pg_condition),
+    );
     debugger.insert("depends_on".to_string(), YamlValue::Dict(depends));
 
     debugger.insert(
@@ -113,19 +116,13 @@ pub fn compose_as_dict(
         "test".to_string(),
         YamlValue::String("redis-cli ping".to_string()),
     );
-    redis_healthcheck.insert(
-        "interval".to_string(),
-        YamlValue::String("5s".to_string()),
+    redis_healthcheck.insert("interval".to_string(), YamlValue::String("5s".to_string()));
+    redis_healthcheck.insert("timeout".to_string(), YamlValue::String("1s".to_string()));
+    redis_healthcheck.insert("retries".to_string(), YamlValue::String("5".to_string()));
+    redis.insert(
+        "healthcheck".to_string(),
+        YamlValue::Dict(redis_healthcheck),
     );
-    redis_healthcheck.insert(
-        "timeout".to_string(),
-        YamlValue::String("1s".to_string()),
-    );
-    redis_healthcheck.insert(
-        "retries".to_string(),
-        YamlValue::String("5".to_string()),
-    );
-    redis.insert("healthcheck".to_string(), YamlValue::Dict(redis_healthcheck));
     services.insert("langgraph-redis".to_string(), YamlValue::Dict(redis));
 
     // Postgres service (if needed)
@@ -166,9 +163,7 @@ pub fn compose_as_dict(
 
         postgres.insert(
             "volumes".to_string(),
-            YamlValue::List(vec![
-                "langgraph-data:/var/lib/postgresql/data".to_string(),
-            ]),
+            YamlValue::List(vec!["langgraph-data:/var/lib/postgresql/data".to_string()]),
         );
 
         let mut pg_healthcheck = IndexMap::new();
@@ -180,29 +175,17 @@ pub fn compose_as_dict(
             "start_period".to_string(),
             YamlValue::String("10s".to_string()),
         );
-        pg_healthcheck.insert(
-            "timeout".to_string(),
-            YamlValue::String("1s".to_string()),
-        );
-        pg_healthcheck.insert(
-            "retries".to_string(),
-            YamlValue::String("5".to_string()),
-        );
+        pg_healthcheck.insert("timeout".to_string(), YamlValue::String("1s".to_string()));
+        pg_healthcheck.insert("retries".to_string(), YamlValue::String("5".to_string()));
 
         if capabilities.healthcheck_start_interval {
-            pg_healthcheck.insert(
-                "interval".to_string(),
-                YamlValue::String("60s".to_string()),
-            );
+            pg_healthcheck.insert("interval".to_string(), YamlValue::String("60s".to_string()));
             pg_healthcheck.insert(
                 "start_interval".to_string(),
                 YamlValue::String("1s".to_string()),
             );
         } else {
-            pg_healthcheck.insert(
-                "interval".to_string(),
-                YamlValue::String("5s".to_string()),
-            );
+            pg_healthcheck.insert("interval".to_string(), YamlValue::String("5s".to_string()));
         }
 
         postgres.insert("healthcheck".to_string(), YamlValue::Dict(pg_healthcheck));
@@ -234,7 +217,10 @@ pub fn compose_as_dict(
         "langgraph-redis".to_string(),
         YamlValue::Dict(redis_condition),
     );
-    api.insert("depends_on".to_string(), YamlValue::Dict(api_depends.clone()));
+    api.insert(
+        "depends_on".to_string(),
+        YamlValue::Dict(api_depends.clone()),
+    );
 
     let mut api_env = IndexMap::new();
     api_env.insert(
@@ -248,10 +234,7 @@ pub fn compose_as_dict(
     api.insert("environment".to_string(), YamlValue::Dict(api_env));
 
     if let Some(img) = image {
-        api.insert(
-            "image".to_string(),
-            YamlValue::String(img.to_string()),
-        );
+        api.insert("image".to_string(), YamlValue::String(img.to_string()));
     }
 
     // Add postgres dependency for API service
@@ -276,10 +259,7 @@ pub fn compose_as_dict(
             "test".to_string(),
             YamlValue::String("python /api/healthcheck.py".to_string()),
         );
-        api_healthcheck.insert(
-            "interval".to_string(),
-            YamlValue::String("60s".to_string()),
-        );
+        api_healthcheck.insert("interval".to_string(), YamlValue::String("60s".to_string()));
         api_healthcheck.insert(
             "start_interval".to_string(),
             YamlValue::String("1s".to_string()),
@@ -298,10 +278,7 @@ pub fn compose_as_dict(
     if include_db {
         let mut volumes = IndexMap::new();
         let mut vol_config = IndexMap::new();
-        vol_config.insert(
-            "driver".to_string(),
-            YamlValue::String("local".to_string()),
-        );
+        vol_config.insert("driver".to_string(), YamlValue::String("local".to_string()));
         volumes.insert("langgraph-data".to_string(), YamlValue::Dict(vol_config));
         compose_dict.insert("volumes".to_string(), YamlValue::Dict(volumes));
     }
@@ -363,7 +340,10 @@ mod tests {
     #[test]
     fn dict_to_yaml_nested() {
         let mut inner = IndexMap::new();
-        inner.insert("inner_key".to_string(), YamlValue::String("inner_value".to_string()));
+        inner.insert(
+            "inner_key".to_string(),
+            YamlValue::String("inner_value".to_string()),
+        );
         let mut dict = IndexMap::new();
         dict.insert("outer".to_string(), YamlValue::Dict(inner));
         let yaml = dict_to_yaml(&dict, 0);
@@ -453,7 +433,16 @@ mod tests {
     #[test]
     fn compose_with_custom_image() {
         let caps = mock_capabilities(false);
-        let yaml = compose(&caps, 8000, None, None, None, Some("custom/image:tag"), None, None);
+        let yaml = compose(
+            &caps,
+            8000,
+            None,
+            None,
+            None,
+            Some("custom/image:tag"),
+            None,
+            None,
+        );
         assert!(yaml.contains("image: custom/image:tag"));
     }
 

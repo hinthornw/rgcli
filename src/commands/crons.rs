@@ -28,10 +28,7 @@ pub async fn list(client: &Client, assistant_id: Option<&str>) -> Result<()> {
             .get("assistant_id")
             .and_then(|v| v.as_str())
             .unwrap_or("-");
-        let created = c
-            .get("created_at")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
+        let created = c.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
         table.add_row(vec![
             Cell::new(id_short).fg(Color::Cyan),
             Cell::new(schedule),
@@ -44,11 +41,7 @@ pub async fn list(client: &Client, assistant_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub async fn create(
-    client: &Client,
-    assistant_id: &str,
-    schedule: &str,
-) -> Result<()> {
+pub async fn create(client: &Client, assistant_id: &str, schedule: &str) -> Result<()> {
     let url = format!("{}/crons", client.endpoint());
     let body = serde_json::json!({
         "assistant_id": assistant_id,

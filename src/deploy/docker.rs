@@ -8,7 +8,7 @@ use regex::Regex;
 use super::config::{Config, EnvConfig, KeepPkgTools};
 use super::constants::{BUILD_TOOLS, DEFAULT_NODE_VERSION};
 use super::docker_tag::docker_tag;
-use super::local_deps::{assemble_local_deps, LocalDeps};
+use super::local_deps::{LocalDeps, assemble_local_deps};
 use super::path_rewrite::{
     update_auth_path, update_encryption_path, update_graph_paths, update_http_app_path,
 };
@@ -26,7 +26,10 @@ fn image_supports_uv(base_image: &str) -> bool {
         Some(m) => {
             let raw = &base_image[m.start() + 1..m.end()];
             let version_str = raw.trim_end_matches('-');
-            let parts: Vec<u32> = version_str.split('.').filter_map(|p: &str| p.parse().ok()).collect();
+            let parts: Vec<u32> = version_str
+                .split('.')
+                .filter_map(|p: &str| p.parse().ok())
+                .collect();
             let version = (
                 *parts.first().unwrap_or(&0),
                 *parts.get(1).unwrap_or(&0),
@@ -103,9 +106,8 @@ fn get_pip_cleanup_lines(
             ));
         }
     } else if pip_installer == "uv" {
-        commands.push(
-            "RUN rm /usr/bin/uv /usr/bin/uvx\n# -- End of build deps removal --".to_string(),
-        );
+        commands
+            .push("RUN rm /usr/bin/uv /usr/bin/uvx\n# -- End of build deps removal --".to_string());
     }
 
     commands.join("\n")
@@ -259,7 +261,9 @@ pub fn python_config_to_docker(
 
     // Configure pip
     let local_reqs_pip_install = {
-        let base = format!("PYTHONDONTWRITEBYTECODE=1 {install_cmd} --no-cache-dir -c /api/constraints.txt");
+        let base = format!(
+            "PYTHONDONTWRITEBYTECODE=1 {install_cmd} --no-cache-dir -c /api/constraints.txt"
+        );
         if config.pip_config_file.is_some() {
             format!("PIP_CONFIG_FILE=/pipconfig.txt {base}")
         } else {
@@ -267,7 +271,9 @@ pub fn python_config_to_docker(
         }
     };
     let global_reqs_pip_install = {
-        let base = format!("PYTHONDONTWRITEBYTECODE=1 {install_cmd} --no-cache-dir -c /api/constraints.txt");
+        let base = format!(
+            "PYTHONDONTWRITEBYTECODE=1 {install_cmd} --no-cache-dir -c /api/constraints.txt"
+        );
         if config.pip_config_file.is_some() {
             format!("PIP_CONFIG_FILE=/pipconfig.txt {base}")
         } else {
@@ -340,24 +346,24 @@ pub fn python_config_to_docker(
     let env_vars = build_config_env_vars(config);
 
     // JS install
-    let js_inst_str =
-        if (config.ui.is_some() || config.node_version.is_some()) && local_deps.working_dir.is_some()
-        {
-            let node_version = config
-                .node_version
-                .as_deref()
-                .unwrap_or(DEFAULT_NODE_VERSION);
-            let install_cmd_node = get_node_pm_install_cmd(config_path, config);
-            let wd = local_deps.working_dir.as_ref().unwrap();
-            format!(
-                "# -- Installing JS dependencies --\n\
+    let js_inst_str = if (config.ui.is_some() || config.node_version.is_some())
+        && local_deps.working_dir.is_some()
+    {
+        let node_version = config
+            .node_version
+            .as_deref()
+            .unwrap_or(DEFAULT_NODE_VERSION);
+        let install_cmd_node = get_node_pm_install_cmd(config_path, config);
+        let wd = local_deps.working_dir.as_ref().unwrap();
+        format!(
+            "# -- Installing JS dependencies --\n\
                  ENV NODE_VERSION={node_version}\n\
                  RUN cd {wd} && {install_cmd_node} && tsx /api/langgraph_api/js/build.mts\n\
                  # -- End of JS dependencies install --"
-            )
-        } else {
-            String::new()
-        };
+        )
+    } else {
+        String::new()
+    };
 
     let image_str = docker_tag(config, Some(base_image), api_version);
 
@@ -528,19 +534,25 @@ pub fn config_to_docker(
             build_context,
         )
     } else {
-        python_config_to_docker(config_path, config, &base_image, api_version, escape_variables)
+        python_config_to_docker(
+            config_path,
+            config,
+            &base_image,
+            api_version,
+            escape_variables,
+        )
     }
 }
 
 fn calculate_relative_workdir(config_path: &Path, build_context: &str) -> Result<String, String> {
-    let config_dir = config_path.parent().unwrap().canonicalize().map_err(|e| {
-        format!(
-            "Could not resolve config directory: {e}"
-        )
-    })?;
-    let build_context_path = Path::new(build_context).canonicalize().map_err(|e| {
-        format!("Could not resolve build context: {e}")
-    })?;
+    let config_dir = config_path
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve config directory: {e}"))?;
+    let build_context_path = Path::new(build_context)
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve build context: {e}"))?;
 
     config_dir
         .strip_prefix(&build_context_path)
@@ -574,7 +586,12 @@ fn build_pip_reqs_str(local_deps: &LocalDeps, config_path: &Path, pip_install: &
             .iter()
             .any(|ac| reqpath.starts_with(ac))
         {
-            let name = reqpath.parent().unwrap().file_name().unwrap().to_string_lossy();
+            let name = reqpath
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy();
             lines.push(format!(
                 "COPY --from=outer-{name} requirements.txt {destpath}"
             ));
@@ -749,10 +766,7 @@ pub fn config_to_compose(
             .iter()
             .map(|(name, path)| format!("                - {name}: {path}"))
             .collect();
-        format!(
-            "\n            additional_contexts:\n{}",
-            lines.join("\n")
-        )
+        format!("\n            additional_contexts:\n{}", lines.join("\n"))
     } else {
         String::new()
     };

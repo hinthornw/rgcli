@@ -137,7 +137,11 @@ pub fn new_run_request_with_attachments(
 }
 
 /// Create a resume request (no new user message, continues interrupted graph).
-pub fn new_resume_request(assistant_id: &str, input: Option<Value>, stream_mode: Option<&str>) -> RunRequest {
+pub fn new_resume_request(
+    assistant_id: &str,
+    input: Option<Value>,
+    stream_mode: Option<&str>,
+) -> RunRequest {
     let mode = stream_mode.unwrap_or("messages-tuple");
     RunRequest {
         assistant_id: assistant_id.to_string(),
@@ -726,13 +730,11 @@ mod tests {
 
     #[test]
     fn test_run_request_with_attachments() {
-        let attachments = vec![
-            Attachment {
-                filename: "image.png".to_string(),
-                mime_type: "image/png".to_string(),
-                base64_data: "iVBORw0KGgoAAAANS...".to_string(),
-            },
-        ];
+        let attachments = vec![Attachment {
+            filename: "image.png".to_string(),
+            mime_type: "image/png".to_string(),
+            base64_data: "iVBORw0KGgoAAAANS...".to_string(),
+        }];
 
         let request = new_run_request_with_attachments(
             "assistant-123",
@@ -753,11 +755,23 @@ mod tests {
 
         // Check text part
         assert_eq!(content[0].get("type").unwrap().as_str().unwrap(), "text");
-        assert_eq!(content[0].get("text").unwrap().as_str().unwrap(), "What's in this image?");
+        assert_eq!(
+            content[0].get("text").unwrap().as_str().unwrap(),
+            "What's in this image?"
+        );
 
         // Check image part
-        assert_eq!(content[1].get("type").unwrap().as_str().unwrap(), "image_url");
-        let image_url = content[1].get("image_url").unwrap().get("url").unwrap().as_str().unwrap();
+        assert_eq!(
+            content[1].get("type").unwrap().as_str().unwrap(),
+            "image_url"
+        );
+        let image_url = content[1]
+            .get("image_url")
+            .unwrap()
+            .get("url")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert!(image_url.starts_with("data:image/png;base64,"));
     }
 

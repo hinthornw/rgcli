@@ -34,11 +34,12 @@ pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> 
         let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
         let id_short = shorten_id(id);
         let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-        let created = r
-            .get("created_at")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
-        table.add_row(vec![Cell::new(id_short).fg(Color::Cyan), status_cell(status), Cell::new(created)]);
+        let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
+        table.add_row(vec![
+            Cell::new(id_short).fg(Color::Cyan),
+            status_cell(status),
+            Cell::new(created),
+        ]);
     }
 
     println!("{table}");
@@ -66,7 +67,10 @@ pub async fn cancel(client: &Client, thread_id: &str, run_id: &str) -> Result<()
 pub async fn watch(client: &Client, thread_id: &str, interval_secs: u64) -> Result<()> {
     use std::io::Write;
 
-    println!("Watching runs for thread {} (Ctrl+C to exit)...\n", thread_id);
+    println!(
+        "Watching runs for thread {} (Ctrl+C to exit)...\n",
+        thread_id
+    );
 
     loop {
         // Clear terminal and move cursor to top

@@ -18,12 +18,7 @@ pub async fn get_item(client: &Client, namespace: &str, key: &str) -> Result<()>
     Ok(())
 }
 
-pub async fn put_item(
-    client: &Client,
-    namespace: &str,
-    key: &str,
-    value: &str,
-) -> Result<()> {
+pub async fn put_item(client: &Client, namespace: &str, key: &str, value: &str) -> Result<()> {
     let ns_parts = parse_namespace(namespace);
     let val: serde_json::Value = serde_json::from_str(value)?;
     let url = format!("{}/store/items", client.endpoint());

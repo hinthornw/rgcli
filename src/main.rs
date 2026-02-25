@@ -554,11 +554,18 @@ async fn main() -> Result<()> {
                 match action {
                     AssistantAction::List => commands::assistants::list(&client).await,
                     AssistantAction::Get { id } => commands::assistants::get(&client, &id).await,
-                    AssistantAction::Graph { id, ascii } => commands::assistants::graph(&client, &id, ascii).await,
-                    AssistantAction::Schemas { id } => commands::assistants::schemas(&client, &id).await,
-                    AssistantAction::Versions { id } => commands::assistants::versions(&client, &id).await,
+                    AssistantAction::Graph { id, ascii } => {
+                        commands::assistants::graph(&client, &id, ascii).await
+                    }
+                    AssistantAction::Schemas { id } => {
+                        commands::assistants::schemas(&client, &id).await
+                    }
+                    AssistantAction::Versions { id } => {
+                        commands::assistants::versions(&client, &id).await
+                    }
                 }
-            }).await;
+            })
+            .await;
         }
         Some(Command::Threads { action }) => {
             return run_sdk_command(|client| async move {
@@ -568,59 +575,104 @@ async fn main() -> Result<()> {
                     ThreadAction::Create => commands::threads::create(&client).await,
                     ThreadAction::Delete { id } => commands::threads::delete(&client, &id).await,
                     ThreadAction::State { id } => commands::threads::state(&client, &id).await,
-                    ThreadAction::History { id, limit } => commands::threads::history(&client, &id, limit).await,
+                    ThreadAction::History { id, limit } => {
+                        commands::threads::history(&client, &id, limit).await
+                    }
                     ThreadAction::Copy { id } => commands::threads::copy(&client, &id).await,
                     ThreadAction::Prune { id } => commands::threads::prune(&client, &id).await,
                 }
-            }).await;
+            })
+            .await;
         }
         Some(Command::Runs { action }) => {
             return run_sdk_command(|client| async move {
                 match action {
-                    RunAction::List { thread_id, limit } => commands::runs::list(&client, &thread_id, limit).await,
-                    RunAction::Get { thread_id, run_id } => commands::runs::get(&client, &thread_id, &run_id).await,
-                    RunAction::Cancel { thread_id, run_id } => commands::runs::cancel(&client, &thread_id, &run_id).await,
-                    RunAction::Watch { thread_id, interval } => commands::runs::watch(&client, &thread_id, interval).await,
+                    RunAction::List { thread_id, limit } => {
+                        commands::runs::list(&client, &thread_id, limit).await
+                    }
+                    RunAction::Get { thread_id, run_id } => {
+                        commands::runs::get(&client, &thread_id, &run_id).await
+                    }
+                    RunAction::Cancel { thread_id, run_id } => {
+                        commands::runs::cancel(&client, &thread_id, &run_id).await
+                    }
+                    RunAction::Watch {
+                        thread_id,
+                        interval,
+                    } => commands::runs::watch(&client, &thread_id, interval).await,
                 }
-            }).await;
+            })
+            .await;
         }
         Some(Command::Store { action }) => {
             return run_sdk_command(|client| async move {
                 match action {
-                    StoreAction::Get { namespace, key } => commands::store::get_item(&client, &namespace, &key).await,
-                    StoreAction::Put { namespace, key, value } => commands::store::put_item(&client, &namespace, &key, &value).await,
-                    StoreAction::Delete { namespace, key } => commands::store::delete_item(&client, &namespace, &key).await,
-                    StoreAction::Search { namespace, query, limit } => commands::store::search(&client, &namespace, query.as_deref(), limit).await,
+                    StoreAction::Get { namespace, key } => {
+                        commands::store::get_item(&client, &namespace, &key).await
+                    }
+                    StoreAction::Put {
+                        namespace,
+                        key,
+                        value,
+                    } => commands::store::put_item(&client, &namespace, &key, &value).await,
+                    StoreAction::Delete { namespace, key } => {
+                        commands::store::delete_item(&client, &namespace, &key).await
+                    }
+                    StoreAction::Search {
+                        namespace,
+                        query,
+                        limit,
+                    } => {
+                        commands::store::search(&client, &namespace, query.as_deref(), limit).await
+                    }
                     StoreAction::Namespaces => commands::store::namespaces(&client).await,
                 }
-            }).await;
+            })
+            .await;
         }
         Some(Command::Crons { action }) => {
             return run_sdk_command(|client| async move {
                 match action {
-                    CronAction::List { assistant } => commands::crons::list(&client, assistant.as_deref()).await,
-                    CronAction::Create { assistant, schedule } => commands::crons::create(&client, &assistant, &schedule).await,
+                    CronAction::List { assistant } => {
+                        commands::crons::list(&client, assistant.as_deref()).await
+                    }
+                    CronAction::Create {
+                        assistant,
+                        schedule,
+                    } => commands::crons::create(&client, &assistant, &schedule).await,
                     CronAction::Delete { id } => commands::crons::delete(&client, &id).await,
                 }
-            }).await;
+            })
+            .await;
         }
-        Some(Command::Bench { concurrent, requests, input, input_file }) => {
+        Some(Command::Bench {
+            concurrent,
+            requests,
+            input,
+            input_file,
+        }) => {
             return run_sdk_command(|client| async move {
                 let inputs = if let Some(path) = input_file {
                     let content = std::fs::read_to_string(&path)
                         .with_context(|| format!("failed to read {}", path))?;
-                    content.lines().filter(|l| !l.trim().is_empty()).map(String::from).collect()
+                    content
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(String::from)
+                        .collect()
                 } else {
                     vec![input]
                 };
                 let cfg = config::load()?;
                 commands::bench::run(&client, &cfg.assistant_id, concurrent, requests, inputs).await
-            }).await;
+            })
+            .await;
         }
         Some(Command::Logs { thread, run, last }) => {
             return run_sdk_command(|client| async move {
                 commands::logs::show(&client, thread.as_deref(), run.as_deref(), last).await
-            }).await;
+            })
+            .await;
         }
         Some(Command::Deploy { action }) => {
             let result = match action {
@@ -914,17 +966,6 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 let thread = client.create_thread().await?;
                 thread_id = thread.thread_id;
                 history.clear();
-            }
-            ui::ChatExit::PickThread => {
-                match handle_resume(&client).await? {
-                    Some((tid, hist)) => {
-                        thread_id = tid;
-                        history = hist;
-                    }
-                    None => {
-                        // User cancelled picker, just re-enter the current chat
-                    }
-                }
             }
             ui::ChatExit::Quit => {
                 println!("To resume this thread:\n  ailsd --thread-id {}", thread_id);

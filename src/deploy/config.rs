@@ -23,7 +23,10 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_version: Option<String>,
 
-    #[serde(rename = "_INTERNAL_docker_tag", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "_INTERNAL_docker_tag",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub internal_docker_tag: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,9 +209,7 @@ pub fn is_node_graph(spec: &GraphSpec) -> bool {
 
     let file_path = path_str.split(':').next().unwrap_or("");
     matches!(
-        Path::new(file_path)
-            .extension()
-            .and_then(|e| e.to_str()),
+        Path::new(file_path).extension().and_then(|e| e.to_str()),
         Some("ts" | "mts" | "cts" | "js" | "mjs" | "cjs")
     )
 }
@@ -236,9 +237,11 @@ fn parse_node_version(version_str: &str) -> Result<u32, String> {
             "Invalid Node.js version format: {version_str}. Use major version only (e.g., '20')."
         ));
     }
-    version_str
-        .parse::<u32>()
-        .map_err(|_| format!("Invalid Node.js version format: {version_str}. Use major version only (e.g., '20')."))
+    version_str.parse::<u32>().map_err(|_| {
+        format!(
+            "Invalid Node.js version format: {version_str}. Use major version only (e.g., '20')."
+        )
+    })
 }
 
 /// Validate a configuration dictionary.
@@ -303,7 +306,9 @@ pub fn validate_config(mut config: Config) -> Result<Config, String> {
     if let Some(ref pyversion) = config.python_version {
         let cleaned = pyversion.split('-').next().unwrap_or(pyversion);
         if cleaned.split('.').count() != 2
-            || !cleaned.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit()))
+            || !cleaned
+                .split('.')
+                .all(|p| p.chars().all(|c| c.is_ascii_digit()))
         {
             return Err(format!(
                 "Invalid Python version format: {pyversion}. \
@@ -330,19 +335,16 @@ pub fn validate_config(mut config: Config) -> Result<Config, String> {
     // Validate graphs
     if config.graphs.is_empty() {
         return Err(
-            "No graphs found in config. Add at least one graph to 'graphs' dictionary."
-                .to_string(),
+            "No graphs found in config. Add at least one graph to 'graphs' dictionary.".to_string(),
         );
     }
 
     // Validate image_distro
     if let Some(ref distro) = config.image_distro {
         if distro == "bullseye" {
-            return Err(
-                "Bullseye images were deprecated in version 0.4.13. \
+            return Err("Bullseye images were deprecated in version 0.4.13. \
                  Please use 'bookworm' or 'debian' instead."
-                    .to_string(),
-            );
+                .to_string());
         }
         if !VALID_DISTROS.contains(&distro.as_str()) {
             return Err(format!(

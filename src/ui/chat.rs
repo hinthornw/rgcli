@@ -1,23 +1,16 @@
 use std::collections::VecDeque;
-use std::io::{Stdout, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::execute;
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use futures_util::StreamExt;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{ThemeSet, Style as SyntectStyle};
+use syntect::highlighting::{Style as SyntectStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use tokio::sync::mpsc;
-use tokio::time;
 use tui_textarea::{CursorMove, Input, Key, TextArea};
 
 use crate::api::types::Attachment;
@@ -30,8 +23,16 @@ const MAX_INPUT_LINES: usize = 5;
 const PLACEHOLDER: &str = "Type a message... (Alt+Enter for newline)";
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const THINKING_VERBS: &[&str] = &[
-    "thinking", "pondering", "contemplating", "musing", "cogitating",
-    "ruminating", "deliberating", "mulling", "noodling", "brainstorming",
+    "thinking",
+    "pondering",
+    "contemplating",
+    "musing",
+    "cogitating",
+    "ruminating",
+    "deliberating",
+    "mulling",
+    "noodling",
+    "brainstorming",
 ];
 const TOOL_RESULT_MAX_LEN: usize = 200;
 const TIPS: &[&str] = &[
@@ -52,11 +53,10 @@ pub enum ChatExit {
     Configure,
     SwitchContext(String),
     NewThread,
-    PickThread,
     Quit,
 }
 
-enum Action {
+pub(crate) enum Action {
     None,
     Send(String),
     Cancel,
@@ -72,10 +72,11 @@ enum Action {
     SwitchAssistant(String),
     Export,
     Mode(String),
+    NavigateScreen(super::screen::Screen),
 }
 
 #[derive(Clone)]
-enum ChatMessage {
+pub(crate) enum ChatMessage {
     User(String),
     Assistant(String),
     System(String),
@@ -85,13 +86,13 @@ enum ChatMessage {
 }
 
 #[derive(Clone)]
-struct CompletionItem {
+pub(crate) struct CompletionItem {
     insert: String,
     label: String,
     desc: String,
 }
 
-struct App {
+pub struct ChatState {
     messages: Vec<ChatMessage>,
     scroll_offset: u16,
     auto_scroll: bool,
@@ -151,7 +152,7 @@ struct App {
 }
 
 #[derive(Default, Clone)]
-struct RunMetrics {
+pub(crate) struct RunMetrics {
     run_started_at: Option<Instant>,
     first_token_at: Option<Instant>,
     last_token_at: Option<Instant>,
@@ -165,7 +166,7 @@ struct RunMetrics {
     last_run_id: Option<String>,
 }
 
-impl App {
+impl ChatState {
     fn new(context_name: &str, update_rx: mpsc::UnboundedReceiver<String>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text(PLACEHOLDER);
@@ -209,6 +210,180 @@ impl App {
     fn is_streaming(&self) -> bool {
         self.stream_rx.is_some()
     }
+
+    /// Handle a terminal key event, executing any resulting actions internally.
+    /// Returns a ScreenAction for the app orchestrator.
+    pub fn handle_key_event(
+        &mut self,
+        event: Event,
+        client: &Client,
+        thread_id: &str,
+    ) -> super::screen::ScreenAction {
+        let action = handle_terminal_event(self, event);
+        self.execute_action(action, client, thread_id)
+    }
+
+    fn execute_action(
+        &mut self,
+        action: Action,
+        client: &Client,
+        thread_id: &str,
+    ) -> super::screen::ScreenAction {
+        use super::screen::ScreenAction;
+        match action {
+            Action::Send(msg) => {
+                self.messages.push(ChatMessage::User(msg.clone()));
+                self.auto_scroll = true;
+                if self.is_streaming() {
+                    self.pending_messages.push_back(msg);
+                    self.messages.push(ChatMessage::System("(queued)".to_string()));
+                } else if self.interrupted {
+                    self.interrupted = false;
+                    let input = if msg.trim().is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::json!({"messages": [{"role": "user", "content": msg}]}))
+                    };
+                    start_resume(client, thread_id, &self.assistant_id.clone(), input, self);
+                } else if !self.pending_attachments.is_empty() {
+                    let attachments = std::mem::take(&mut self.pending_attachments);
+                    start_run_with_attachments(
+                        client,
+                        thread_id,
+                        &self.assistant_id.clone(),
+                        &msg,
+                        &attachments,
+                        self,
+                    );
+                } else {
+                    start_run(client, thread_id, &self.assistant_id.clone(), &msg, None, self);
+                }
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::Cancel => {
+                if let Some(run_id) = self.active_run_id.clone() {
+                    let client = client.clone();
+                    let tid = thread_id.to_string();
+                    tokio::spawn(async move {
+                        let _ = client.cancel_run(&tid, &run_id).await;
+                    });
+                    self.messages.push(ChatMessage::System("(cancelling...)".to_string()));
+                }
+                ScreenAction::None
+            }
+            Action::Quit => ScreenAction::ChatExit(ChatExit::Quit),
+            Action::Configure => ScreenAction::ChatExit(ChatExit::Configure),
+            Action::SwitchContext(name) => ScreenAction::ChatExit(ChatExit::SwitchContext(name)),
+            Action::Help => {
+                show_help(self);
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::NewThread => ScreenAction::ChatExit(ChatExit::NewThread),
+            Action::PickThread => ScreenAction::Navigate(super::screen::Screen::Threads),
+            Action::Clear => {
+                self.messages.clear();
+                self.auto_scroll = true;
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::Attach(path) => {
+                handle_attach(self, &path);
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::ListAssistants => {
+                list_assistants(self);
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::SwitchAssistant(id) => {
+                self.assistant_id = id.clone();
+                self.messages.push(ChatMessage::System(
+                    format!("Switched to assistant: {id}"),
+                ));
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::Export => {
+                export_conversation(self);
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::Mode(mode) => {
+                self.stream_mode = mode.clone();
+                self.messages.push(ChatMessage::System(
+                    format!("Stream mode set to: {mode}"),
+                ));
+                reset_textarea(self);
+                ScreenAction::None
+            }
+            Action::NavigateScreen(screen) => ScreenAction::Navigate(screen),
+            Action::None => ScreenAction::None,
+        }
+    }
+
+    pub fn handle_tick(&mut self) {
+        if self.is_streaming() {
+            self.spinner_idx += 1;
+        }
+    }
+
+    pub async fn handle_stream_event(&mut self, client: &Client, thread_id: &str) {
+        if let Some(event) = recv_stream(&mut self.stream_rx).await {
+            handle_stream_event(self, event, client, thread_id).await;
+        }
+    }
+
+    pub fn handle_update_notice(&mut self) {
+        // Try to receive an update notice without blocking
+        if let Some(rx) = &mut self.update_rx {
+            if let Ok(notice) = rx.try_recv() {
+                self.update_notice = Some(notice);
+            }
+        }
+    }
+
+    pub fn draw_in_area(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let input_height = (self.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
+        let status_height = if self.search_mode { 2 } else { 1 };
+
+        if self.devtools {
+            let chunks = Layout::vertical([
+                Constraint::Min(3),
+                Constraint::Length(input_height),
+                Constraint::Length(1),
+                Constraint::Length(status_height),
+            ])
+            .split(area);
+
+            render_chat(frame, self, chunks[0]);
+            render_input(frame, self, chunks[1]);
+            render_devtools(frame, self, chunks[2]);
+            render_status(frame, self, chunks[3]);
+        } else {
+            let chunks = Layout::vertical([
+                Constraint::Min(3),
+                Constraint::Length(input_height),
+                Constraint::Length(status_height),
+            ])
+            .split(area);
+
+            render_chat(frame, self, chunks[0]);
+            render_input(frame, self, chunks[1]);
+            render_status(frame, self, chunks[2]);
+        }
+    }
+
+    pub fn has_pending_stream(&self) -> bool {
+        self.stream_rx.is_some()
+    }
+
+    #[allow(dead_code)]
+    pub fn has_pending_update(&self) -> bool {
+        self.update_rx.is_some()
+    }
 }
 
 pub struct ChatConfig {
@@ -236,7 +411,7 @@ pub async fn run_chat_loop(
         let _ = check_for_updates_loop(update_tx).await;
     });
 
-    let mut app = App::new(&chat_config.context_info, update_rx);
+    let mut app = ChatState::new(&chat_config.context_info, update_rx);
     app.assistant_id = assistant_id.to_string();
     app.available_assistants = chat_config.available_assistants.clone();
     app.tenant_id = chat_config.tenant_id.clone();
@@ -297,7 +472,9 @@ pub async fn run_chat_loop(
     app.welcome_lines.push(Line::default());
     app.welcome_lines.push(Line::from(Span::styled(
         format!("  tip: {}", random_tip()),
-        Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        Style::new()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
     )));
 
     app.context_names = chat_config.context_names.clone();
@@ -329,177 +506,11 @@ pub async fn run_chat_loop(
         }
     }
 
-    terminal::enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout());
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
-
-    let result = run_event_loop(&mut terminal, &mut app, client, thread_id).await;
-
-    execute!(stdout(), LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
-
-    result
-}
-
-async fn run_event_loop(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &mut App,
-    client: &Client,
-    thread_id: &str,
-) -> Result<ChatExit> {
-    let mut term_events = EventStream::new();
-    let mut interval = time::interval(Duration::from_millis(80));
-
-    terminal.draw(|f| draw(f, app))?;
-
-    loop {
-        tokio::select! {
-            biased;
-
-            Some(notice) = recv_update(&mut app.update_rx) => {
-                app.update_notice = Some(notice);
-                terminal.draw(|f| draw(f, app))?;
-            }
-
-            Some(event) = recv_stream(&mut app.stream_rx) => {
-                handle_stream_event(app, event, client, thread_id).await;
-                terminal.draw(|f| draw(f, app))?;
-            }
-
-            Some(Ok(event)) = term_events.next() => {
-                let action = handle_terminal_event(app, event);
-                match action {
-                    Action::Send(msg) => {
-                        app.messages.push(ChatMessage::User(msg.clone()));
-                        app.auto_scroll = true;
-                        if app.is_streaming() {
-                            app.pending_messages.push_back(msg);
-                            app.messages.push(ChatMessage::System("(queued)".to_string()));
-                        } else if app.interrupted {
-                            // Resume interrupted graph
-                            app.interrupted = false;
-                            let input = if msg.trim().is_empty() {
-                                None
-                            } else {
-                                Some(serde_json::json!({"messages": [{"role": "user", "content": msg}]}))
-                            };
-                            start_resume(client, thread_id, &app.assistant_id.clone(), input, app);
-                        } else if !app.pending_attachments.is_empty() {
-                            let attachments = std::mem::take(&mut app.pending_attachments);
-                            start_run_with_attachments(
-                                client,
-                                thread_id,
-                                &app.assistant_id.clone(),
-                                &msg,
-                                &attachments,
-                                app,
-                            );
-                        } else {
-                            start_run(client, thread_id, &app.assistant_id.clone(), &msg, None, app);
-                        }
-                        reset_textarea(app);
-                    }
-                    Action::Cancel => {
-                        if let Some(run_id) = app.active_run_id.clone() {
-                            let client = client.clone();
-                            let tid = thread_id.to_string();
-                            tokio::spawn(async move {
-                                let _ = client.cancel_run(&tid, &run_id).await;
-                            });
-                            app.messages.push(ChatMessage::System("(cancelling...)".to_string()));
-                        }
-                    }
-                    Action::Quit => return Ok(ChatExit::Quit),
-                    Action::Configure => return Ok(ChatExit::Configure),
-                    Action::SwitchContext(name) => return Ok(ChatExit::SwitchContext(name)),
-                    Action::Help => {
-                        show_help(app);
-                        reset_textarea(app);
-                    }
-                    Action::NewThread => return Ok(ChatExit::NewThread),
-                    Action::PickThread => return Ok(ChatExit::PickThread),
-                    Action::Clear => {
-                        app.messages.clear();
-                        app.auto_scroll = true;
-                        reset_textarea(app);
-                    }
-                    Action::Attach(path) => {
-                        handle_attach(app, &path);
-                        reset_textarea(app);
-                    }
-                    Action::ListAssistants => {
-                        list_assistants(app);
-                        reset_textarea(app);
-                    }
-                    Action::SwitchAssistant(id) => {
-                        app.assistant_id = id.clone();
-                        app.messages.push(ChatMessage::System(
-                            format!("Switched to assistant: {id}"),
-                        ));
-                        reset_textarea(app);
-                    }
-                    Action::Export => {
-                        export_conversation(app);
-                        reset_textarea(app);
-                    }
-                    Action::Mode(mode) => {
-                        app.stream_mode = mode.clone();
-                        app.messages.push(ChatMessage::System(
-                            format!("Stream mode set to: {mode}"),
-                        ));
-                        reset_textarea(app);
-                    }
-                    Action::None => {}
-                }
-                terminal.draw(|f| draw(f, app))?;
-            }
-
-            _ = interval.tick() => {
-                if app.is_streaming() {
-                    app.spinner_idx += 1;
-                    terminal.draw(|f| draw(f, app))?;
-                }
-            }
-        }
-    }
+    let tui = super::app::TuiApp::new(app, client.clone(), thread_id.to_string());
+    tui.run().await
 }
 
 // --- Drawing ---
-
-fn draw(frame: &mut ratatui::Frame, app: &mut App) {
-    let input_height = (app.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
-    let area = frame.area();
-
-    let status_height = if app.search_mode { 2 } else { 1 };
-
-    if app.devtools {
-        let chunks = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(input_height),
-            Constraint::Length(1),
-            Constraint::Length(status_height),
-        ])
-        .split(area);
-
-        render_chat(frame, app, chunks[0]);
-        render_input(frame, app, chunks[1]);
-        render_devtools(frame, app, chunks[2]);
-        render_status(frame, app, chunks[3]);
-    } else {
-        let chunks = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(input_height),
-            Constraint::Length(status_height),
-        ])
-        .split(area);
-
-        render_chat(frame, app, chunks[0]);
-        render_input(frame, app, chunks[1]);
-        render_status(frame, app, chunks[2]);
-    }
-}
 
 fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -509,7 +520,9 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
 
     let ps = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
-    let theme = ts.themes.get("base16-ocean.dark")
+    let theme = ts
+        .themes
+        .get("base16-ocean.dark")
         .unwrap_or_else(|| ts.themes.values().next().unwrap());
 
     for raw_line in text.lines() {
@@ -517,20 +530,19 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
             if in_code_block {
                 // End of code block - render accumulated code with syntax highlighting
                 if let Some(lang) = &code_language {
-                    let syntax = ps.find_syntax_by_token(lang)
+                    let syntax = ps
+                        .find_syntax_by_token(lang)
                         .unwrap_or_else(|| ps.find_syntax_plain_text());
                     let mut highlighter = HighlightLines::new(syntax, theme);
 
                     for code_line in &code_lines {
-                        let highlighted = highlighter.highlight_line(code_line, &ps)
+                        let highlighted = highlighter
+                            .highlight_line(code_line, &ps)
                             .unwrap_or_default();
                         let spans: Vec<Span<'static>> = highlighted
                             .into_iter()
                             .map(|(style, text)| {
-                                Span::styled(
-                                    format!("  {}", text),
-                                    syntect_to_ratatui_style(style),
-                                )
+                                Span::styled(format!("  {}", text), syntect_to_ratatui_style(style))
                             })
                             .collect();
                         lines.push(Line::from(spans));
@@ -582,7 +594,10 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
                     .fg(Color::Cyan),
             )));
-        } else if let Some(item) = raw_line.strip_prefix("- ").or_else(|| raw_line.strip_prefix("* ")) {
+        } else if let Some(item) = raw_line
+            .strip_prefix("- ")
+            .or_else(|| raw_line.strip_prefix("* "))
+        {
             lines.push(Line::from(format!("  • {item}")));
         } else {
             // Inline formatting: **bold** and `code`
@@ -594,20 +609,19 @@ fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
     // Handle unclosed code block at end of text
     if in_code_block && !code_lines.is_empty() {
         if let Some(lang) = &code_language {
-            let syntax = ps.find_syntax_by_token(lang)
+            let syntax = ps
+                .find_syntax_by_token(lang)
                 .unwrap_or_else(|| ps.find_syntax_plain_text());
             let mut highlighter = HighlightLines::new(syntax, theme);
 
             for code_line in &code_lines {
-                let highlighted = highlighter.highlight_line(code_line, &ps)
+                let highlighted = highlighter
+                    .highlight_line(code_line, &ps)
                     .unwrap_or_default();
                 let spans: Vec<Span<'static>> = highlighted
                     .into_iter()
                     .map(|(style, text)| {
-                        Span::styled(
-                            format!("  {}", text),
-                            syntect_to_ratatui_style(style),
-                        )
+                        Span::styled(format!("  {}", text), syntect_to_ratatui_style(style))
                     })
                     .collect();
                 lines.push(Line::from(spans));
@@ -678,7 +692,7 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
     spans
 }
 
-fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     lines.extend(app.welcome_lines.clone());
@@ -711,7 +725,9 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         let mut spans =
                             vec![Span::styled("Assistant: ", styles::assistant_style())];
                         if is_match {
-                            let highlighted_spans: Vec<Span> = line.spans.into_iter()
+                            let highlighted_spans: Vec<Span> = line
+                                .spans
+                                .into_iter()
                                 .map(|s| Span::styled(s.content, s.style.patch(highlight_style)))
                                 .collect();
                             spans.extend(highlighted_spans);
@@ -721,7 +737,9 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         lines.push(Line::from(spans));
                         first = false;
                     } else if is_match {
-                        let highlighted_spans: Vec<Span> = line.spans.into_iter()
+                        let highlighted_spans: Vec<Span> = line
+                            .spans
+                            .into_iter()
                             .map(|s| Span::styled(s.content, s.style.patch(highlight_style)))
                             .collect();
                         lines.push(Line::from(highlighted_spans));
@@ -737,9 +755,20 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     args.clone()
                 };
                 lines.push(Line::from(vec![
-                    Span::styled("  🔧 ", Style::new().fg(Color::Yellow).patch(highlight_style)),
-                    Span::styled(name.as_str(), Style::new().add_modifier(Modifier::BOLD).patch(highlight_style)),
-                    Span::styled(format!("({args_short})"), Style::new().fg(Color::DarkGray).patch(highlight_style)),
+                    Span::styled(
+                        "  🔧 ",
+                        Style::new().fg(Color::Yellow).patch(highlight_style),
+                    ),
+                    Span::styled(
+                        name.as_str(),
+                        Style::new()
+                            .add_modifier(Modifier::BOLD)
+                            .patch(highlight_style),
+                    ),
+                    Span::styled(
+                        format!("({args_short})"),
+                        Style::new().fg(Color::DarkGray).patch(highlight_style),
+                    ),
                 ]));
             }
             ChatMessage::ToolResult(name, content) => {
@@ -751,7 +780,10 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 // Show first line only, indented
                 let first_line = truncated.lines().next().unwrap_or("").to_string();
                 lines.push(Line::from(vec![
-                    Span::styled("  ← ", Style::new().fg(Color::DarkGray).patch(highlight_style)),
+                    Span::styled(
+                        "  ← ",
+                        Style::new().fg(Color::DarkGray).patch(highlight_style),
+                    ),
                     Span::styled(
                         format!("{name}: "),
                         Style::new()
@@ -759,7 +791,10 @@ fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                             .add_modifier(Modifier::ITALIC)
                             .patch(highlight_style),
                     ),
-                    Span::styled(first_line, Style::new().fg(Color::DarkGray).patch(highlight_style)),
+                    Span::styled(
+                        first_line,
+                        Style::new().fg(Color::DarkGray).patch(highlight_style),
+                    ),
                 ]));
             }
             ChatMessage::System(text) => {
@@ -840,7 +875,7 @@ fn compute_auto_scroll(lines: &[Line], area: Rect) -> u16 {
     }
 }
 
-fn render_input(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+fn render_input(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(ratatui::style::Style::new().dark_gray());
@@ -887,7 +922,7 @@ fn render_input(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
     let mut parts: Vec<Span> = vec![Span::styled(" devtools ", styles::user_style())];
 
     if app.is_streaming() || app.is_waiting {
@@ -939,17 +974,17 @@ fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+fn render_status(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
     if app.search_mode {
         // Split area into search bar and status bar
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
         // Render search bar
-        let search_text = format!(" Search: {} ({} matches)", app.search_query, app.search_matches.len());
+        let search_text = format!(
+            " Search: {} ({} matches)",
+            app.search_query,
+            app.search_matches.len()
+        );
         let search_line = Line::from(Span::styled(
             search_text,
             Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -964,7 +999,7 @@ fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+fn render_status_bar(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
     let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
 
     // Show current assistant
@@ -1025,13 +1060,6 @@ fn render_status_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 
 // --- Streaming ---
 
-async fn recv_update(rx: &mut Option<mpsc::UnboundedReceiver<String>>) -> Option<String> {
-    match rx {
-        Some(rx) => rx.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
 async fn check_for_updates_loop(tx: mpsc::UnboundedSender<String>) -> Result<()> {
     use crate::update;
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -1052,7 +1080,7 @@ async fn recv_stream(rx: &mut Option<mpsc::UnboundedReceiver<StreamEvent>>) -> O
     }
 }
 
-async fn handle_stream_event(app: &mut App, event: StreamEvent, client: &Client, thread_id: &str) {
+async fn handle_stream_event(app: &mut ChatState, event: StreamEvent, client: &Client, thread_id: &str) {
     match event {
         StreamEvent::RunStarted(id) => {
             app.active_run_id = Some(id.clone());
@@ -1174,7 +1202,7 @@ fn start_run(
     assistant_id: &str,
     message: &str,
     multitask_strategy: Option<&str>,
-    app: &mut App,
+    app: &mut ChatState,
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
     app.stream_rx = Some(rx);
@@ -1216,7 +1244,7 @@ fn start_run_with_attachments(
     assistant_id: &str,
     message: &str,
     attachments: &[Attachment],
-    app: &mut App,
+    app: &mut ChatState,
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
     app.stream_rx = Some(rx);
@@ -1240,7 +1268,14 @@ fn start_run_with_attachments(
 
     tokio::spawn(async move {
         client
-            .stream_run_with_attachments(&thread_id, &assistant_id, &message, &attachments, Some(&stream_mode), &tx)
+            .stream_run_with_attachments(
+                &thread_id,
+                &assistant_id,
+                &message,
+                &attachments,
+                Some(&stream_mode),
+                &tx,
+            )
             .await;
     });
 }
@@ -1250,7 +1285,7 @@ fn start_resume(
     thread_id: &str,
     assistant_id: &str,
     input: Option<serde_json::Value>,
-    app: &mut App,
+    app: &mut ChatState,
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
     app.stream_rx = Some(rx);
@@ -1279,7 +1314,7 @@ fn start_resume(
 
 // --- Input handling ---
 
-fn handle_terminal_event(app: &mut App, event: Event) -> Action {
+fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action {
     let Event::Key(key) = event else {
         return Action::None;
     };
@@ -1366,6 +1401,12 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
                 app.textarea.insert_newline();
             }
         }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.textarea = TextArea::default();
+            app.textarea.set_placeholder_text(PLACEHOLDER);
+            app.textarea
+                .set_cursor_line_style(ratatui::style::Style::default());
+        }
         KeyCode::Enter => {
             let value = collect_input(&app.textarea);
             // Allow empty Enter to resume interrupted graph
@@ -1399,6 +1440,18 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
             if value == "/threads" {
                 return Action::PickThread;
             }
+            if value == "/runs" {
+                return Action::NavigateScreen(super::screen::Screen::Runs);
+            }
+            if value == "/store" {
+                return Action::NavigateScreen(super::screen::Screen::Store);
+            }
+            if value == "/crons" {
+                return Action::NavigateScreen(super::screen::Screen::Crons);
+            }
+            if value == "/logs" {
+                return Action::NavigateScreen(super::screen::Screen::Logs);
+            }
             if value == "/clear" {
                 return Action::Clear;
             }
@@ -1416,7 +1469,10 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
             if value == "/export" {
                 return Action::Export;
             }
-            if value == "/assistants" || value == "/assistant" {
+            if value == "/assistants" {
+                return Action::NavigateScreen(super::screen::Screen::Assistants);
+            }
+            if value == "/assistant" {
                 return Action::ListAssistants;
             }
             if let Some(id) = value.strip_prefix("/assistant ") {
@@ -1478,7 +1534,7 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
     Action::None
 }
 
-fn handle_completion_key(key: &KeyEvent, app: &mut App) -> Option<Action> {
+fn handle_completion_key(key: &KeyEvent, app: &mut ChatState) -> Option<Action> {
     match key.code {
         KeyCode::Tab | KeyCode::Down => {
             app.completion_idx = (app.completion_idx + 1) % app.completions.len();
@@ -1517,7 +1573,7 @@ fn collect_input(textarea: &TextArea) -> String {
         .to_string()
 }
 
-fn update_search_matches(app: &mut App) {
+fn update_search_matches(app: &mut ChatState) {
     app.search_matches.clear();
     if app.search_query.is_empty() {
         return;
@@ -1526,7 +1582,10 @@ fn update_search_matches(app: &mut App) {
     let query_lower = app.search_query.to_lowercase();
     for (idx, msg) in app.messages.iter().enumerate() {
         let text = match msg {
-            ChatMessage::User(text) | ChatMessage::Assistant(text) | ChatMessage::System(text) | ChatMessage::Error(text) => text,
+            ChatMessage::User(text)
+            | ChatMessage::Assistant(text)
+            | ChatMessage::System(text)
+            | ChatMessage::Error(text) => text,
             ChatMessage::ToolUse(name, args) => {
                 let combined = format!("{} {}", name, args);
                 if combined.to_lowercase().contains(&query_lower) {
@@ -1549,7 +1608,7 @@ fn update_search_matches(app: &mut App) {
     }
 }
 
-fn update_completions(app: &mut App) {
+fn update_completions(app: &mut ChatState) {
     let value: String = app
         .textarea
         .lines()
@@ -1643,7 +1702,7 @@ fn to_textarea_input(key: KeyEvent) -> Option<Input> {
     })
 }
 
-fn handle_attach(app: &mut App, path: &str) {
+fn handle_attach(app: &mut ChatState, path: &str) {
     let expanded = if path.starts_with('~') {
         if let Some(home) = dirs_home() {
             path.replacen('~', &home, 1)
@@ -1702,7 +1761,7 @@ fn dirs_home() -> Option<String> {
     std::env::var("HOME").ok()
 }
 
-fn list_assistants(app: &mut App) {
+fn list_assistants(app: &mut ChatState) {
     if app.available_assistants.is_empty() {
         app.messages
             .push(ChatMessage::System("No assistants found.".to_string()));
@@ -1725,7 +1784,7 @@ fn list_assistants(app: &mut App) {
     app.auto_scroll = true;
 }
 
-fn export_conversation(app: &mut App) {
+fn export_conversation(app: &mut ChatState) {
     let mut md = String::new();
     for msg in &app.messages {
         match msg {
@@ -1799,8 +1858,28 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Switch context (/context <name>)",
     },
     SlashCommand {
+        name: "/assistants",
+        desc: "Browse assistants",
+    },
+    SlashCommand {
         name: "/assistant",
-        desc: "List or switch assistants",
+        desc: "Switch assistant (/assistant <id>)",
+    },
+    SlashCommand {
+        name: "/runs",
+        desc: "Browse runs",
+    },
+    SlashCommand {
+        name: "/store",
+        desc: "Browse store",
+    },
+    SlashCommand {
+        name: "/crons",
+        desc: "Browse cron jobs",
+    },
+    SlashCommand {
+        name: "/logs",
+        desc: "Browse recent logs",
     },
     SlashCommand {
         name: "/mode",
@@ -1836,14 +1915,14 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     },
 ];
 
-fn reset_textarea(app: &mut App) {
+fn reset_textarea(app: &mut ChatState) {
     app.textarea = TextArea::default();
     app.textarea.set_placeholder_text(PLACEHOLDER);
     app.textarea
         .set_cursor_line_style(ratatui::style::Style::default());
 }
 
-fn show_help(app: &mut App) {
+fn show_help(app: &mut ChatState) {
     app.messages
         .push(ChatMessage::System("Commands:".to_string()));
     for cmd in SLASH_COMMANDS {

@@ -49,8 +49,16 @@ impl BenchReport {
         } else {
             None
         };
-        let p50_ttft = if !ttfts.is_empty() { Some(percentile(&ttfts, 50)) } else { None };
-        let p95_ttft = if !ttfts.is_empty() { Some(percentile(&ttfts, 95)) } else { None };
+        let p50_ttft = if !ttfts.is_empty() {
+            Some(percentile(&ttfts, 50))
+        } else {
+            None
+        };
+        let p95_ttft = if !ttfts.is_empty() {
+            Some(percentile(&ttfts, 95))
+        } else {
+            None
+        };
 
         let requests_per_sec = if wall_time.as_secs_f64() > 0.0 {
             total as f64 / wall_time.as_secs_f64()
@@ -132,10 +140,7 @@ impl BenchReport {
         println!();
 
         // ASCII histogram of latencies
-        print_histogram(
-            "Latency Distribution",
-            &self.latency_histogram(),
-        );
+        print_histogram("Latency Distribution", &self.latency_histogram());
     }
 
     fn latency_histogram(&self) -> Vec<(String, usize)> {
@@ -176,14 +181,23 @@ fn percentile(sorted: &[Duration], pct: usize) -> Duration {
 mod tests {
     use super::*;
 
-    fn mock_result(duration_ms: u64, ttft_ms: Option<u64>, token_count: usize, success: bool) -> RunResult {
+    fn mock_result(
+        duration_ms: u64,
+        ttft_ms: Option<u64>,
+        token_count: usize,
+        success: bool,
+    ) -> RunResult {
         RunResult {
             duration: Duration::from_millis(duration_ms),
             ttft: ttft_ms.map(Duration::from_millis),
             token_count,
             total_chars: token_count * 4, // Approximation
             success,
-            error: if success { None } else { Some("error".to_string()) },
+            error: if success {
+                None
+            } else {
+                Some("error".to_string())
+            },
         }
     }
 

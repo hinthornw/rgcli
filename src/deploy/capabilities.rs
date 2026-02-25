@@ -77,8 +77,8 @@ pub fn check_capabilities() -> Result<DockerCapabilities, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|_| "Docker not installed or not running".to_string())?;
+    let info: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|_| "Docker not installed or not running".to_string())?;
 
     let server_version = info
         .get("ServerVersion")

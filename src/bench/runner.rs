@@ -35,11 +35,7 @@ pub struct BenchConfig {
 }
 
 /// Execute the benchmark, sending results through the channel.
-pub async fn run_bench(
-    client: Client,
-    config: BenchConfig,
-    tx: mpsc::UnboundedSender<BenchEvent>,
-) {
+pub async fn run_bench(client: Client, config: BenchConfig, tx: mpsc::UnboundedSender<BenchEvent>) {
     let client = Arc::new(client);
     let inputs = Arc::new(config.inputs);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(config.concurrent));
@@ -81,7 +77,7 @@ async fn run_single(client: &Client, assistant_id: &str, input: &str) -> RunResu
                 total_chars: 0,
                 success: false,
                 error: Some(e.to_string()),
-            }
+            };
         }
     };
 

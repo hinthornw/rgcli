@@ -49,9 +49,7 @@ impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             current_context: default_context_name(),
-            contexts: HashMap::from([
-                ("default".to_string(), builtin_default_config()),
-            ]),
+            contexts: HashMap::from([("default".to_string(), builtin_default_config())]),
         }
     }
 }
@@ -71,16 +69,15 @@ pub fn cache_dir() -> Result<PathBuf> {
 }
 
 pub fn config_path() -> Result<String> {
-    Ok(config_dir()?.join("config.yaml").to_string_lossy().to_string())
+    Ok(config_dir()?
+        .join("config.yaml")
+        .to_string_lossy()
+        .to_string())
 }
 
 fn local_config_path() -> Option<PathBuf> {
     let path = PathBuf::from(LOCAL_CONFIG_FILE);
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
+    if path.exists() { Some(path) } else { None }
 }
 
 pub fn exists() -> bool {

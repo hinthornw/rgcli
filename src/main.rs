@@ -14,7 +14,7 @@ use inquire::{Confirm, Password, Select, Text};
 
 use crate::api::Client;
 use crate::config::Config;
-use crate::ui::{print_error, print_logo, system_text};
+use crate::ui::print_error;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -82,14 +82,12 @@ enum Command {
     /// Upgrade to the latest version
     Upgrade,
     /// Manage deployment contexts (like kubectl config)
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   ailsd context create staging
   ailsd context use staging
   ailsd context list
   ailsd context show production
-  ailsd context delete old-context"
-    )]
+  ailsd context delete old-context")]
     Context {
         #[command(subcommand)]
         action: ContextAction,
@@ -204,7 +202,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Err(err) = run(cli.resume).await {
+    if let Err(err) = run(cli.resume, cli.thread_id.as_deref()).await {
         eprintln!("{}", print_error(&err.to_string()));
         std::process::exit(1);
     }
@@ -213,7 +211,8 @@ async fn main() -> Result<()> {
 }
 
 async fn run_pipe(thread_id: Option<&str>, json_output: bool) -> Result<()> {
-    let cfg = config::load().context("failed to load config (run `ailsd` interactively first to configure)")?;
+    let cfg = config::load()
+        .context("failed to load config (run `ailsd` interactively first to configure)")?;
     let client = Client::new(&cfg)?;
 
     // Read all of stdin
@@ -252,7 +251,7 @@ async fn run_pipe(thread_id: Option<&str>, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run(resume: bool) -> Result<()> {
+async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
     if !config::exists() {
         // Save the built-in default so config file exists for future runs
         let default_cfg = config::ContextConfig::default();
@@ -279,13 +278,6 @@ async fn run(resume: bool) -> Result<()> {
         Err(_) => "context: default".to_string(),
     };
 
-    print_logo(&version_string(), &cfg.endpoint, &config_path, &context_info);
-
-    if let Some(notice) = update::pending_update_notice() {
-        println!("  {}", system_text(&notice));
-    }
-    println!();
-
     let mut client = Client::new(&cfg)?;
 
     let (thread_id, mut history) = if resume {
@@ -298,8 +290,23 @@ async fn run(resume: bool) -> Result<()> {
         (thread.thread_id, Vec::new())
     };
 
+    let chat_config = ui::ChatConfig {
+        version: version_string(),
+        endpoint: cfg.endpoint.clone(),
+        config_path,
+        context_info,
+    };
+
     loop {
-        match ui::run_chat_loop(&client, &cfg.assistant_id, &thread_id, &history).await? {
+        match ui::run_chat_loop(
+            &client,
+            &cfg.assistant_id,
+            &thread_id,
+            &history,
+            &chat_config,
+        )
+        .await?
+        {
             ui::ChatExit::Configure => {
                 let context_name = config::current_context_name();
                 let new_cfg = run_configure_inner(Some(&cfg)).context("configuration failed")?;
@@ -308,7 +315,13 @@ async fn run(resume: bool) -> Result<()> {
                 client = Client::new(&cfg)?;
                 history.clear();
             }
-            ui::ChatExit::Quit => return Ok(()),
+            ui::ChatExit::Quit => {
+                println!(
+                    "To resume this thread:\n  ailsd --resume --thread-id {}",
+                    thread_id
+                );
+                return Ok(());
+            }
         }
     }
 }
@@ -475,7 +488,10 @@ fn search_and_pick_deployment(api_key: &str) -> Result<String> {
             deployments.iter().filter(|d| d.url().is_some()).collect();
 
         if with_url.is_empty() {
-            println!("Found {} deployments but none have a URL configured.", deployments.len());
+            println!(
+                "Found {} deployments but none have a URL configured.",
+                deployments.len()
+            );
             let retry = Confirm::new("Try another search?")
                 .with_default(true)
                 .prompt()?;

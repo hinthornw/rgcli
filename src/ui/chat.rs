@@ -1,26 +1,30 @@
 use std::collections::VecDeque;
-use std::io::{stdout, Write};
+use std::io::{Stdout, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal;
 use crossterm::execute;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use futures_util::StreamExt;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Stylize;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use tokio::sync::mpsc;
 use tokio::time;
 use tui_textarea::{CursorMove, Input, Key, TextArea};
 
 use crate::api::{Client, StreamEvent};
-use crate::ui::styles::{assistant_prefix, print_error, system_text, user_prefix, user_prompt};
+use crate::ui::styles;
 
-const PROMPT: &str = "> ";
 const CTRL_C_TIMEOUT: Duration = Duration::from_secs(1);
 const ESC_TIMEOUT: Duration = Duration::from_millis(500);
-const MAX_INPUT_LINES: usize = 10;
+const MAX_INPUT_LINES: usize = 5;
 const PLACEHOLDER: &str = "Type a message... (Alt+Enter for newline)";
-const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 #[derive(Debug)]
 pub enum ChatExit {
@@ -36,41 +40,71 @@ enum Action {
     Configure,
 }
 
-struct ChatState {
-    // Input
-    textarea: TextArea<'static>,
-    last_rendered_lines: u16,
-    ctrl_c_at: Option<Instant>,
-    last_esc_at: Option<Instant>,
-    completions: Vec<usize>,
-    completion_idx: usize,
-    show_complete: bool,
+#[derive(Clone)]
+enum ChatMessage {
+    User(String),
+    Assistant(String),
+    System(String),
+    Error(String),
+}
+
+struct App {
+    messages: Vec<ChatMessage>,
+    scroll_offset: u16,
+    auto_scroll: bool,
+
     // Streaming
     stream_rx: Option<mpsc::UnboundedReceiver<StreamEvent>>,
     active_run_id: Option<String>,
-    first_token: bool,
+    streaming_text: String,
     spinner_idx: usize,
-    // Queue
+    is_waiting: bool,
+
+    // Input
+    textarea: TextArea<'static>,
+
+    // Keys
+    ctrl_c_at: Option<Instant>,
+    last_esc_at: Option<Instant>,
+
+    // Completions
+    completions: Vec<usize>,
+    completion_idx: usize,
+    show_complete: bool,
+
+    // Queue & status
     pending_messages: VecDeque<String>,
+    update_notice: Option<String>,
+    update_rx: Option<mpsc::UnboundedReceiver<String>>,
+    context_name: String,
+    welcome_lines: Vec<Line<'static>>,
 }
 
-impl ChatState {
-    fn new() -> Self {
+impl App {
+    fn new(context_name: &str, update_rx: mpsc::UnboundedReceiver<String>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text(PLACEHOLDER);
+        textarea.set_cursor_line_style(ratatui::style::Style::default());
         Self {
+            messages: Vec::new(),
+            scroll_offset: 0,
+            auto_scroll: true,
+            stream_rx: None,
+            active_run_id: None,
+            streaming_text: String::new(),
+            spinner_idx: 0,
+            is_waiting: false,
             textarea,
-            last_rendered_lines: 0,
             ctrl_c_at: None,
             last_esc_at: None,
             completions: Vec::new(),
             completion_idx: 0,
             show_complete: false,
-            stream_rx: None,
-            active_run_id: None,
-            first_token: false,
-            spinner_idx: 0,
             pending_messages: VecDeque::new(),
+            update_notice: None,
+            update_rx: Some(update_rx),
+            context_name: context_name.to_string(),
+            welcome_lines: Vec::new(),
         }
     }
 
@@ -79,21 +113,11 @@ impl ChatState {
     }
 }
 
-struct TerminalGuard;
-
-impl TerminalGuard {
-    fn enter() -> Result<Self> {
-        terminal::enable_raw_mode()?;
-        execute!(stdout(), Hide)?;
-        Ok(Self)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = execute!(stdout(), Show);
-        let _ = terminal::disable_raw_mode();
-    }
+pub struct ChatConfig {
+    pub version: String,
+    pub endpoint: String,
+    pub config_path: String,
+    pub context_info: String,
 }
 
 pub async fn run_chat_loop(
@@ -101,167 +125,414 @@ pub async fn run_chat_loop(
     assistant_id: &str,
     thread_id: &str,
     history: &[crate::api::Message],
+    chat_config: &ChatConfig,
 ) -> Result<ChatExit> {
-    if !history.is_empty() {
-        println!("{}", format_history(history));
-        println!();
+    // Spawn background update checker
+    let (update_tx, update_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let _ = check_for_updates_loop(update_tx).await;
+    });
+
+    let mut app = App::new(&chat_config.context_info, update_rx);
+
+    // Add logo as initial chat content
+    app.welcome_lines = styles::logo_lines(
+        &chat_config.version,
+        &chat_config.endpoint,
+        &chat_config.config_path,
+        &chat_config.context_info,
+    );
+
+    // Load history
+    for msg in history {
+        match msg.role.as_str() {
+            "user" | "human" => app.messages.push(ChatMessage::User(msg.content.clone())),
+            "assistant" | "ai" => app
+                .messages
+                .push(ChatMessage::Assistant(msg.content.clone())),
+            _ => app.messages.push(ChatMessage::System(format!(
+                "[{}] {}",
+                msg.role, msg.content
+            ))),
+        }
     }
 
-    let _guard = TerminalGuard::enter()?;
-    let mut state = ChatState::new();
+    // Enter alternate screen
+    terminal::enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout());
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+
+    let result = run_event_loop(&mut terminal, &mut app, client, assistant_id, thread_id).await;
+
+    // Restore terminal
+    execute!(stdout(), LeaveAlternateScreen)?;
+    terminal::disable_raw_mode()?;
+
+    result
+}
+
+async fn run_event_loop(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    client: &Client,
+    assistant_id: &str,
+    thread_id: &str,
+) -> Result<ChatExit> {
     let mut term_events = EventStream::new();
     let mut interval = time::interval(Duration::from_millis(80));
 
-    render_input(&mut state)?;
+    // Initial draw
+    terminal.draw(|f| draw(f, app))?;
 
     loop {
         tokio::select! {
             biased;
 
-            // Stream events from background run (highest priority)
-            Some(event) = recv_stream(&mut state.stream_rx) => {
-                handle_stream_event(
-                    &mut state, event, client, thread_id, assistant_id,
-                )?;
+            // Update notifications
+            Some(notice) = recv_update(&mut app.update_rx) => {
+                app.update_notice = Some(notice);
+                terminal.draw(|f| draw(f, app))?;
             }
 
-            // Terminal input events
+            // Stream events
+            Some(event) = recv_stream(&mut app.stream_rx) => {
+                handle_stream_event(app, event, client, thread_id, assistant_id);
+                terminal.draw(|f| draw(f, app))?;
+            }
+
+            // Terminal input
             Some(Ok(event)) = term_events.next() => {
-                let action = handle_terminal_event(&mut state, event)?;
+                let action = handle_terminal_event(app, event);
                 match action {
                     Action::Send(msg) => {
-                        clear_rendered(&mut state.last_rendered_lines)?;
-                        println!("{}{}\r", user_prefix(), msg);
-                        if state.is_streaming() {
-                            // Queue for later with enqueue strategy
-                            state.pending_messages.push_back(msg);
-                            write!(stdout(), "{}\r\n", system_text("(queued)"))?;
-                            stdout().flush()?;
+                        app.messages.push(ChatMessage::User(msg.clone()));
+                        app.auto_scroll = true;
+                        if app.is_streaming() {
+                            app.pending_messages.push_back(msg);
+                            app.messages.push(ChatMessage::System("(queued)".to_string()));
                         } else {
-                            start_run(client, thread_id, assistant_id, &msg, None, &mut state);
+                            start_run(client, thread_id, assistant_id, &msg, None, app);
                         }
-                        // Reset textarea
-                        state.textarea = TextArea::default();
-                        state.textarea.set_placeholder_text(PLACEHOLDER);
-                        render_input(&mut state)?;
+                        app.textarea = TextArea::default();
+                        app.textarea.set_placeholder_text(PLACEHOLDER);
+                        app.textarea.set_cursor_line_style(ratatui::style::Style::default());
                     }
                     Action::Cancel => {
-                        if let Some(run_id) = state.active_run_id.clone() {
+                        if let Some(run_id) = app.active_run_id.clone() {
                             let client = client.clone();
                             let tid = thread_id.to_string();
                             tokio::spawn(async move {
                                 let _ = client.cancel_run(&tid, &run_id).await;
                             });
-                            clear_rendered(&mut state.last_rendered_lines)?;
-                            write!(stdout(), "\r\n{}\r\n", system_text("(cancelling...)"))?;
-                            stdout().flush()?;
-                            render_input(&mut state)?;
+                            app.messages.push(ChatMessage::System("(cancelling...)".to_string()));
                         }
                     }
                     Action::Quit => {
-                        clear_rendered(&mut state.last_rendered_lines)?;
-                        // Drop guard restores terminal
-                        drop(_guard);
-                        println!("Goodbye!");
                         return Ok(ChatExit::Quit);
                     }
                     Action::Configure => {
-                        clear_rendered(&mut state.last_rendered_lines)?;
                         return Ok(ChatExit::Configure);
                     }
-                    Action::None => {
-                        render_input(&mut state)?;
-                    }
+                    Action::None => {}
                 }
+                terminal.draw(|f| draw(f, app))?;
             }
 
             // Spinner tick
             _ = interval.tick() => {
-                if state.is_streaming() && state.first_token {
-                    clear_rendered(&mut state.last_rendered_lines)?;
-                    let frame = SPINNER_FRAMES[state.spinner_idx % SPINNER_FRAMES.len()];
-                    state.spinner_idx += 1;
-                    write!(stdout(), "\r{} Thinking...", frame)?;
-                    stdout().flush()?;
-                    write!(stdout(), "\r\n")?;
-                    render_input(&mut state)?;
+                if app.is_streaming() {
+                    app.spinner_idx += 1;
+                    terminal.draw(|f| draw(f, app))?;
                 }
             }
         }
     }
 }
 
-/// Receive from stream_rx, or pend forever if None.
+// --- Drawing ---
+
+fn draw(frame: &mut ratatui::Frame, app: &mut App) {
+    let input_height = (app.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2; // +2 for borders
+    let area = frame.area();
+
+    let chunks = Layout::vertical([
+        Constraint::Min(3),
+        Constraint::Length(input_height),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    render_chat(frame, app, chunks[0]);
+    render_input(frame, app, chunks[1]);
+    render_status(frame, app, chunks[2]);
+}
+
+fn render_chat(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Welcome logo
+    lines.extend(app.welcome_lines.clone());
+
+    for msg in &app.messages {
+        match msg {
+            ChatMessage::User(text) => {
+                lines.push(Line::default());
+                for line in text.lines() {
+                    lines.push(Line::from(vec![
+                        Span::styled("You: ", styles::user_style()),
+                        Span::raw(line),
+                    ]));
+                }
+            }
+            ChatMessage::Assistant(text) => {
+                lines.push(Line::default());
+                let mut first = true;
+                for line in text.lines() {
+                    if first {
+                        lines.push(Line::from(vec![
+                            Span::styled("Assistant: ", styles::assistant_style()),
+                            Span::raw(line),
+                        ]));
+                        first = false;
+                    } else {
+                        lines.push(Line::raw(line));
+                    }
+                }
+            }
+            ChatMessage::System(text) => {
+                lines.push(Line::from(Span::styled(
+                    text.as_str(),
+                    styles::system_style_r(),
+                )));
+            }
+            ChatMessage::Error(text) => {
+                lines.push(Line::from(Span::styled(
+                    text.as_str(),
+                    styles::error_style_r(),
+                )));
+            }
+        }
+    }
+
+    // Streaming content
+    if !app.streaming_text.is_empty() {
+        lines.push(Line::default());
+        let mut first = true;
+        for line in app.streaming_text.lines() {
+            if first {
+                lines.push(Line::from(vec![
+                    Span::styled("Assistant: ", styles::assistant_style()),
+                    Span::raw(line),
+                ]));
+                first = false;
+            } else {
+                lines.push(Line::raw(line));
+            }
+        }
+        // Handle trailing newline
+        if app.streaming_text.ends_with('\n') {
+            lines.push(Line::raw(""));
+        }
+    } else if app.is_waiting {
+        let frame_idx = app.spinner_idx % SPINNER_FRAMES.len();
+        let spinner = SPINNER_FRAMES[frame_idx];
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            format!("{} Thinking...", spinner),
+            styles::system_style_r(),
+        )));
+    }
+
+    let scroll = if app.auto_scroll {
+        compute_auto_scroll(&lines, area)
+    } else {
+        app.scroll_offset
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::NONE))
+        .scroll((scroll, 0));
+
+    frame.render_widget(paragraph, area);
+}
+
+fn compute_auto_scroll(lines: &[Line], area: Rect) -> u16 {
+    // Estimate total wrapped lines manually
+    let width = area.width.max(1) as usize;
+    let mut total: u16 = 0;
+    for line in lines {
+        let line_len: usize = line.spans.iter().map(|s| s.content.len()).sum();
+        if line_len == 0 {
+            total += 1;
+        } else {
+            total += line_len.div_ceil(width) as u16;
+        }
+    }
+    let visible = area.height;
+    if total > visible {
+        total.saturating_sub(visible)
+    } else {
+        0
+    }
+}
+
+fn render_input(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(ratatui::style::Style::new().dark_gray());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(&app.textarea, inner);
+
+    // Render completion popup above input area
+    if app.show_complete && !app.completions.is_empty() {
+        let items: Vec<Line> = app
+            .completions
+            .iter()
+            .enumerate()
+            .map(|(i, &idx)| {
+                let cmd = &SLASH_COMMANDS[idx];
+                if i == app.completion_idx {
+                    Line::from(vec![
+                        Span::styled(format!(" > {} ", cmd.name), styles::user_style()),
+                        Span::styled(cmd.desc, styles::system_style_r()),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::raw(format!("   {} ", cmd.name)),
+                        Span::styled(cmd.desc, styles::system_style_r()),
+                    ])
+                }
+            })
+            .collect();
+
+        let popup_height = items.len() as u16 + 2; // +2 for borders
+        let popup_width = 40.min(area.width);
+
+        // Position popup just above the input area
+        let popup_area = Rect {
+            x: area.x,
+            y: area.y.saturating_sub(popup_height),
+            width: popup_width,
+            height: popup_height,
+        };
+
+        let popup = Paragraph::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(ratatui::style::Style::new().dark_gray()),
+        );
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
+}
+
+fn render_status(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
+
+    if !app.pending_messages.is_empty() {
+        let n = app.pending_messages.len();
+        left_parts.push(Span::raw(format!(" | {} queued", n)));
+    }
+
+    let right = if let Some(notice) = &app.update_notice {
+        notice.clone()
+    } else {
+        String::new()
+    };
+
+    // Build the status line: left-aligned context, right-aligned notice
+    let left_text: String = left_parts.iter().map(|s| s.content.as_ref()).collect();
+    let left_len = left_text.len();
+    let right_len = right.len();
+    let padding = (area.width as usize).saturating_sub(left_len + right_len + 1);
+
+    let mut spans = left_parts;
+    spans.push(Span::raw(" ".repeat(padding)));
+    if !right.is_empty() {
+        spans.push(Span::raw(right));
+        spans.push(Span::raw(" "));
+    }
+
+    let line = Line::from(spans);
+    let status = Paragraph::new(line).style(styles::status_bar_style());
+    frame.render_widget(status, area);
+}
+
+// --- Streaming ---
+
+async fn recv_update(rx: &mut Option<mpsc::UnboundedReceiver<String>>) -> Option<String> {
+    match rx {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn check_for_updates_loop(tx: mpsc::UnboundedSender<String>) -> Result<()> {
+    use crate::update;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    loop {
+        let _ = update::force_check().await;
+        if let Some(notice) = update::pending_update_notice() {
+            let _ = tx.send(notice);
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    }
+}
+
 async fn recv_stream(rx: &mut Option<mpsc::UnboundedReceiver<StreamEvent>>) -> Option<StreamEvent> {
     match rx {
         Some(rx) => rx.recv().await,
-        None => {
-            // Never resolves — makes this select arm inactive
-            std::future::pending().await
-        }
+        None => std::future::pending().await,
     }
 }
 
 fn handle_stream_event(
-    state: &mut ChatState,
+    app: &mut App,
     event: StreamEvent,
     client: &Client,
     thread_id: &str,
     assistant_id: &str,
-) -> Result<()> {
+) {
     match event {
         StreamEvent::RunStarted(id) => {
-            state.active_run_id = Some(id);
+            app.active_run_id = Some(id);
         }
         StreamEvent::Token(token) => {
-            clear_rendered(&mut state.last_rendered_lines)?;
-            if state.first_token {
-                // Clear spinner line
-                write!(stdout(), "\r\x1b[2K")?;
-                write!(stdout(), "{}", assistant_prefix())?;
-                state.first_token = false;
-            }
-            write!(stdout(), "{}", token)?;
-            stdout().flush()?;
-            // Move to next line so input renders below
-            write!(stdout(), "\r\n")?;
-            render_input(state)?;
+            app.is_waiting = false;
+            app.streaming_text.push_str(&token);
+            app.auto_scroll = true;
         }
         StreamEvent::Done(result) => {
-            clear_rendered(&mut state.last_rendered_lines)?;
-            if state.first_token {
-                // Never got a token — clear spinner
-                write!(stdout(), "\r\x1b[2K")?;
-            }
             if let Err(err) = result {
-                write!(stdout(), "\r\n{}\r\n", print_error(&err.to_string()))?;
-            } else {
-                // Fetch updated thread state in background
-                let client = client.clone();
-                let tid = thread_id.to_string();
-                tokio::spawn(async move {
-                    let _ = client.get_thread(&tid, &["values"]).await;
-                });
+                app.messages
+                    .push(ChatMessage::Error(format!("Error: {}", err)));
+            } else if !app.streaming_text.is_empty() {
+                let text = std::mem::take(&mut app.streaming_text);
+                app.messages.push(ChatMessage::Assistant(text));
             }
-            write!(stdout(), "\r\n")?;
-            stdout().flush()?;
-
-            // Clear streaming state
-            state.stream_rx = None;
-            state.active_run_id = None;
-            state.first_token = false;
+            app.streaming_text.clear();
+            app.stream_rx = None;
+            app.active_run_id = None;
+            app.is_waiting = false;
 
             // Drain queue
-            if let Some(msg) = state.pending_messages.pop_front() {
-                write!(stdout(), "{}{}\r\n", user_prefix(), msg)?;
-                stdout().flush()?;
-                start_run(client, thread_id, assistant_id, &msg, Some("enqueue"), state);
+            if let Some(msg) = app.pending_messages.pop_front() {
+                // Remove the "(queued)" system message
+                if let Some(ChatMessage::System(s)) = app.messages.last() {
+                    if s == "(queued)" {
+                        app.messages.pop();
+                    }
+                }
+                app.messages.push(ChatMessage::User(msg.clone()));
+                start_run(client, thread_id, assistant_id, &msg, Some("enqueue"), app);
             }
-
-            render_input(state)?;
         }
     }
-    Ok(())
 }
 
 fn start_run(
@@ -270,13 +541,14 @@ fn start_run(
     assistant_id: &str,
     message: &str,
     multitask_strategy: Option<&str>,
-    state: &mut ChatState,
+    app: &mut App,
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
-    state.stream_rx = Some(rx);
-    state.first_token = true;
-    state.spinner_idx = 0;
-    state.active_run_id = None;
+    app.stream_rx = Some(rx);
+    app.is_waiting = true;
+    app.spinner_idx = 0;
+    app.active_run_id = None;
+    app.streaming_text.clear();
 
     let client = client.clone();
     let thread_id = thread_id.to_string();
@@ -297,245 +569,157 @@ fn start_run(
     });
 }
 
-fn handle_terminal_event(state: &mut ChatState, event: Event) -> Result<Action> {
+// --- Input handling ---
+
+fn handle_terminal_event(app: &mut App, event: Event) -> Action {
     let Event::Key(key) = event else {
-        return Ok(Action::None);
+        return Action::None;
     };
 
     // Reset ctrl_c if different key
     if key.code != KeyCode::Char('c') || !key.modifiers.contains(KeyModifiers::CONTROL) {
-        state.ctrl_c_at = None;
+        app.ctrl_c_at = None;
     }
 
     // Check ctrl_c timeout
-    if let Some(start) = state.ctrl_c_at {
+    if let Some(start) = app.ctrl_c_at {
         if start.elapsed() > CTRL_C_TIMEOUT {
-            state.ctrl_c_at = None;
+            app.ctrl_c_at = None;
         }
     }
 
     // Esc timeout
-    if let Some(start) = state.last_esc_at {
+    if let Some(start) = app.last_esc_at {
         if start.elapsed() > ESC_TIMEOUT {
-            state.last_esc_at = None;
+            app.last_esc_at = None;
         }
     }
 
     // Completion handling
-    if state.show_complete
-        && !state.completions.is_empty()
-        && handle_completion_keys(
-            &key,
-            &mut state.textarea,
-            &mut state.show_complete,
-            &mut state.completion_idx,
-            &state.completions,
-        )?
-    {
-        update_completions(&state.textarea, &mut state.completions, &mut state.show_complete);
-        return Ok(Action::None);
+    if app.show_complete && !app.completions.is_empty() {
+        if let Some(action) = handle_completion_key(&key, app) {
+            return action;
+        }
     }
 
     match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if state.ctrl_c_at.is_some() {
-                return Ok(Action::Quit);
+            if app.ctrl_c_at.is_some() {
+                return Action::Quit;
             }
-            state.ctrl_c_at = Some(Instant::now());
+            app.ctrl_c_at = Some(Instant::now());
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return Ok(Action::Quit);
+            return Action::Quit;
         }
         KeyCode::Esc => {
-            if state.last_esc_at.is_some() && state.is_streaming() {
-                state.last_esc_at = None;
-                return Ok(Action::Cancel);
+            if app.last_esc_at.is_some() && app.is_streaming() {
+                app.last_esc_at = None;
+                return Action::Cancel;
             }
-            state.last_esc_at = Some(Instant::now());
-            // Also dismiss completions
-            state.show_complete = false;
+            app.last_esc_at = Some(Instant::now());
+            app.show_complete = false;
         }
         // Alt+Enter or Ctrl+J = newline
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
-            if state.textarea.lines().len() < MAX_INPUT_LINES {
-                state.textarea.insert_newline();
+            if app.textarea.lines().len() < MAX_INPUT_LINES {
+                app.textarea.insert_newline();
             }
         }
         KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if state.textarea.lines().len() < MAX_INPUT_LINES {
-                state.textarea.insert_newline();
+            if app.textarea.lines().len() < MAX_INPUT_LINES {
+                app.textarea.insert_newline();
             }
         }
         // Enter = send
         KeyCode::Enter => {
-            let value = collect_input(&state.textarea);
+            let value = collect_input(&app.textarea);
             if value.is_empty() {
-                return Ok(Action::None);
+                return Action::None;
             }
             if value == "/quit" || value == "/exit" {
-                return Ok(Action::Quit);
+                return Action::Quit;
             }
             if value == "/configure" {
-                return Ok(Action::Configure);
+                return Action::Configure;
             }
-            return Ok(Action::Send(value));
+            return Action::Send(value);
+        }
+        // Scroll
+        KeyCode::PageUp => {
+            app.auto_scroll = false;
+            app.scroll_offset = app.scroll_offset.saturating_add(10);
+        }
+        KeyCode::PageDown => {
+            if app.scroll_offset > 0 {
+                app.scroll_offset = app.scroll_offset.saturating_sub(10);
+            } else {
+                app.auto_scroll = true;
+            }
         }
         KeyCode::Tab => {
-            update_completions(&state.textarea, &mut state.completions, &mut state.show_complete);
-            if state.show_complete {
-                state.completion_idx = 0;
+            update_completions(&app.textarea, &mut app.completions, &mut app.show_complete);
+            if app.show_complete {
+                app.completion_idx = 0;
             }
         }
         _ => {
             if let Some(input) = to_textarea_input(key) {
-                state.textarea.input(input);
+                app.textarea.input(input);
             }
         }
     }
 
-    update_completions(&state.textarea, &mut state.completions, &mut state.show_complete);
-    Ok(Action::None)
+    update_completions(&app.textarea, &mut app.completions, &mut app.show_complete);
+    Action::None
 }
 
-// --- Rendering ---
-
-fn clear_rendered(last_rendered_lines: &mut u16) -> Result<()> {
-    let mut out = stdout();
-    if *last_rendered_lines > 0 {
-        for _ in 0..*last_rendered_lines {
-            write!(out, "\x1b[A\r\x1b[2K")?;
+fn handle_completion_key(key: &KeyEvent, app: &mut App) -> Option<Action> {
+    match key.code {
+        KeyCode::Tab | KeyCode::Down => {
+            app.completion_idx = (app.completion_idx + 1) % app.completions.len();
+            Some(Action::None)
         }
-        out.flush()?;
-    }
-    *last_rendered_lines = 0;
-    Ok(())
-}
-
-fn render_input(state: &mut ChatState) -> Result<()> {
-    let mut out = stdout();
-
-    if state.last_rendered_lines > 0 {
-        for _ in 0..state.last_rendered_lines {
-            write!(out, "\x1b[A\r\x1b[2K")?;
+        KeyCode::Up | KeyCode::BackTab => {
+            app.completion_idx =
+                (app.completion_idx + app.completions.len() - 1) % app.completions.len();
+            Some(Action::None)
         }
-    }
-
-    let term_width = terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
-    let prompt_len = PROMPT.len();
-    let max_width = term_width.saturating_sub(prompt_len).max(1);
-
-    let mut display_lines: Vec<String> = Vec::new();
-    let mut line_map: Vec<(usize, usize)> = Vec::new();
-
-    for (idx, line) in state.textarea.lines().iter().enumerate() {
-        let mut remaining = line.as_str();
-        if remaining.is_empty() {
-            display_lines.push(String::new());
-            line_map.push((idx, 0));
-            continue;
+        KeyCode::Enter => {
+            let cmd = SLASH_COMMANDS[app.completions[app.completion_idx]].name;
+            app.textarea = TextArea::from([cmd.to_string()]);
+            app.textarea.move_cursor(CursorMove::End);
+            app.show_complete = false;
+            Some(Action::None)
         }
-        let mut col = 0usize;
-        while !remaining.is_empty() {
-            let take = remaining.len().min(max_width);
-            let (chunk, rest) = remaining.split_at(take);
-            display_lines.push(chunk.to_string());
-            line_map.push((idx, col));
-            remaining = rest;
-            col += take;
+        KeyCode::Esc => {
+            app.show_complete = false;
+            Some(Action::None)
         }
+        _ => None,
     }
-
-    if display_lines.is_empty() {
-        display_lines.push(String::new());
-        line_map.push((0, 0));
-    }
-
-    let (cursor_display_row, cursor_display_col) =
-        raw_cursor_position(&line_map, state.textarea.cursor(), max_width);
-    let total_lines = display_lines.len();
-    let mut start = 0usize;
-    if total_lines > MAX_INPUT_LINES && cursor_display_row + 1 > MAX_INPUT_LINES {
-        start = cursor_display_row + 1 - MAX_INPUT_LINES;
-    }
-    let visible_lines = total_lines.min(MAX_INPUT_LINES);
-    let indent = " ".repeat(prompt_len);
-    let is_empty = state.textarea.is_empty();
-
-    let mut total_output_lines = 0u16;
-
-    for i in 0..visible_lines {
-        let line = &display_lines[start + i];
-        let prefix = if i == 0 { user_prompt() } else { indent.clone() };
-        if is_empty && i == 0 {
-            write!(out, "{}{}\r\n", prefix, system_text(PLACEHOLDER))?;
-        } else {
-            write!(out, "{}{}\r\n", prefix, line)?;
-        }
-        total_output_lines += 1;
-    }
-
-    if state.show_complete && !state.completions.is_empty() {
-        write!(out, "\r\n")?;
-        total_output_lines += 1;
-        for (i, idx) in state.completions.iter().enumerate() {
-            let cmd = &SLASH_COMMANDS[*idx];
-            if i == state.completion_idx {
-                write!(out, "{} {}\r\n", system_text(&format!("-> {}", cmd.name)), cmd.desc)?;
-            } else {
-                write!(out, "  {} {}\r\n", cmd.name, cmd.desc)?;
-            }
-            total_output_lines += 1;
-        }
-    }
-
-    if state.ctrl_c_at.is_some() {
-        write!(out, "\r\n{}\r\n", system_text("Press Ctrl+C again to exit"))?;
-        total_output_lines += 2;
-    }
-
-    // Show queue count if streaming with pending messages
-    if !state.pending_messages.is_empty() {
-        let n = state.pending_messages.len();
-        write!(out, "{}\r\n", system_text(&format!("({n} message(s) queued)")))?;
-        total_output_lines += 1;
-    }
-
-    state.last_rendered_lines = total_output_lines;
-
-    // Position cursor
-    let display_row = cursor_display_row.saturating_sub(start);
-    let lines_from_bottom = total_output_lines.saturating_sub(1) - display_row as u16;
-    if lines_from_bottom > 0 {
-        write!(out, "\x1b[{}A", lines_from_bottom)?;
-    }
-    let col = prompt_len + cursor_display_col + 1;
-    write!(out, "\x1b[{}G", col)?;
-
-    out.flush()?;
-    Ok(())
 }
 
 // --- Input helpers ---
 
-fn raw_input(textarea: &TextArea) -> String {
+fn collect_input(textarea: &TextArea) -> String {
     textarea
         .lines()
         .iter()
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n")
+        .trim()
+        .to_string()
 }
 
-fn collect_input(textarea: &TextArea) -> String {
-    raw_input(textarea).trim().to_string()
-}
-
-fn update_completions(
-    textarea: &TextArea,
-    completions: &mut Vec<usize>,
-    show_complete: &mut bool,
-) {
-    let value = raw_input(textarea);
+fn update_completions(textarea: &TextArea, completions: &mut Vec<usize>, show_complete: &mut bool) {
+    let value: String = textarea
+        .lines()
+        .iter()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     if !value.starts_with('/') || value.contains('\n') {
         completions.clear();
         *show_complete = false;
@@ -544,54 +728,6 @@ fn update_completions(
     let matches = slash_completions(&value);
     *show_complete = !matches.is_empty();
     *completions = matches;
-}
-
-fn handle_completion_keys(
-    key: &KeyEvent,
-    textarea: &mut TextArea,
-    show_complete: &mut bool,
-    completion_idx: &mut usize,
-    completions: &[usize],
-) -> Result<bool> {
-    match key.code {
-        KeyCode::Tab | KeyCode::Down => {
-            *completion_idx = (*completion_idx + 1) % completions.len();
-            Ok(true)
-        }
-        KeyCode::Up | KeyCode::BackTab => {
-            *completion_idx = (*completion_idx + completions.len() - 1) % completions.len();
-            Ok(true)
-        }
-        KeyCode::Enter => {
-            let cmd = SLASH_COMMANDS[completions[*completion_idx]].name;
-            *textarea = TextArea::from([cmd.to_string()]);
-            textarea.move_cursor(CursorMove::End);
-            *show_complete = false;
-            Ok(true)
-        }
-        KeyCode::Esc => {
-            *show_complete = false;
-            Ok(true)
-        }
-        _ => Ok(false),
-    }
-}
-
-fn raw_cursor_position(
-    line_map: &[(usize, usize)],
-    cursor: (usize, usize),
-    max_width: usize,
-) -> (usize, usize) {
-    let (cursor_row, cursor_col) = cursor;
-    let mut display_row = 0usize;
-    for (i, (row, base_col)) in line_map.iter().enumerate() {
-        if *row == cursor_row && cursor_col >= *base_col && cursor_col < *base_col + max_width {
-            display_row = i;
-            let display_col = cursor_col - *base_col;
-            return (display_row, display_col);
-        }
-    }
-    (display_row, 0)
 }
 
 fn to_textarea_input(key: KeyEvent) -> Option<Input> {
@@ -625,29 +761,9 @@ fn to_textarea_input(key: KeyEvent) -> Option<Input> {
     })
 }
 
-// --- History formatting ---
-
-fn format_message(msg: &crate::api::Message) -> String {
-    match msg.role.as_str() {
-        "user" | "human" => format!("{}{}", user_prefix(), msg.content),
-        "assistant" | "ai" => format!("{}{}", assistant_prefix(), msg.content),
-        _ => format!("[{}] {}", msg.role, msg.content),
-    }
-}
-
-fn format_history(messages: &[crate::api::Message]) -> String {
-    let mut out = String::new();
-    for (i, msg) in messages.iter().enumerate() {
-        out.push_str(&format_message(msg));
-        if i + 1 < messages.len() {
-            out.push_str("\n\n");
-        }
-    }
-    out
-}
-
 // --- Slash commands ---
 
+#[allow(dead_code)]
 struct SlashCommand {
     name: &'static str,
     desc: &'static str,

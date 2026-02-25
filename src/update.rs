@@ -86,9 +86,7 @@ async fn download_binary(http: &reqwest::Client, version: &str) -> Result<PathBu
     let (os, arch) = platform_target()?;
     let ver_no_v = version.strip_prefix('v').unwrap_or(version);
     let filename = format!("ailsd_{ver_no_v}_{os}_{arch}.tar.gz");
-    let url = format!(
-        "https://github.com/{GITHUB_REPO}/releases/download/{version}/{filename}"
-    );
+    let url = format!("https://github.com/{GITHUB_REPO}/releases/download/{version}/{filename}");
 
     let cache = config::cache_dir()?;
     let archive_path = cache.join(&filename);
@@ -150,12 +148,22 @@ fn is_newer(latest: &str, current: &str) -> bool {
 }
 
 /// Run in background on startup. Silently checks for updates and pre-downloads.
+/// Respects the 4-hour throttle.
 pub async fn background_check() -> Result<()> {
     let state = read_state();
     if !needs_check(&state) {
         return Ok(());
     }
+    do_check(state).await
+}
 
+/// Force a check regardless of throttle (used by in-session polling).
+pub async fn force_check() -> Result<()> {
+    let state = read_state();
+    do_check(state).await
+}
+
+async fn do_check(state: UpdateState) -> Result<()> {
     let http = reqwest::Client::new();
     let latest = fetch_latest_version(&http).await?;
     let current = current_version();
@@ -203,7 +211,10 @@ pub fn pending_update_notice() -> Option<String> {
 /// Explicit upgrade command.
 pub async fn run_upgrade() -> Result<()> {
     let current = current_version();
-    println!("Current version: v{}", current.strip_prefix('v').unwrap_or(&current));
+    println!(
+        "Current version: v{}",
+        current.strip_prefix('v').unwrap_or(&current)
+    );
     println!("Checking for updates...");
 
     let http = reqwest::Client::new();
@@ -230,14 +241,14 @@ pub async fn run_upgrade() -> Result<()> {
         PathBuf::from(path)
     } else {
         println!("Downloading {latest}...");
-        download_binary(&http, &latest).await.context("failed to download update")?
+        download_binary(&http, &latest)
+            .await
+            .context("failed to download update")?
     };
 
     // Self-replace
     let current_exe = std::env::current_exe().context("failed to determine current executable")?;
-    let current_exe = current_exe
-        .canonicalize()
-        .unwrap_or(current_exe);
+    let current_exe = current_exe.canonicalize().unwrap_or(current_exe);
 
     println!("Installing...");
 

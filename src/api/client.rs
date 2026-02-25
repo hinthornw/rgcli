@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT};
 use reqwest::StatusCode;
+use reqwest::header::{ACCEPT, HeaderMap, HeaderName, HeaderValue};
 use tokio::sync::mpsc;
 
 use crate::api::sse::{
-    extract_run_id, is_end_event, is_message_event, is_metadata_event, parse_sse, SseEvent,
+    SseEvent, extract_run_id, is_end_event, is_message_event, is_metadata_event, parse_sse,
 };
 use crate::api::types::{
-    is_ai_chunk, message_chunk_content, new_run_request, parse_message_chunk, Thread, ThreadState,
+    Thread, ThreadState, is_ai_chunk, message_chunk_content, new_run_request, parse_message_chunk,
 };
 use crate::config::Config;
 
@@ -134,7 +134,13 @@ impl Client {
         tx: &mpsc::UnboundedSender<StreamEvent>,
     ) {
         let result = self
-            .stream_run_inner(thread_id, assistant_id, user_message, multitask_strategy, tx)
+            .stream_run_inner(
+                thread_id,
+                assistant_id,
+                user_message,
+                multitask_strategy,
+                tx,
+            )
             .await;
         let _ = tx.send(StreamEvent::Done(result));
     }

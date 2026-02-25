@@ -117,7 +117,10 @@ pub fn message_chunk_content(chunk: &MessageChunk) -> String {
 }
 
 pub fn is_ai_chunk(chunk: &MessageChunk) -> bool {
-    matches!(chunk.chunk_type.as_deref(), Some("AIMessageChunk") | Some("ai"))
+    matches!(
+        chunk.chunk_type.as_deref(),
+        Some("AIMessageChunk") | Some("ai")
+    )
 }
 
 pub fn get_messages(values: &Value) -> Vec<Message> {

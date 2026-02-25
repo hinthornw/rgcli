@@ -47,8 +47,7 @@ pub fn current() -> Result<()> {
     if !cfg.assistant_id.is_empty() {
         println!("Assistant: {}", cfg.assistant_id);
     }
-    let has_key = !cfg.api_key.is_empty()
-        || std::env::var("LANGSMITH_API_KEY").is_ok();
+    let has_key = !cfg.api_key.is_empty() || std::env::var("LANGSMITH_API_KEY").is_ok();
     println!("Auth: {}", if has_key { "API key" } else { "none" });
     Ok(())
 }
@@ -56,7 +55,10 @@ pub fn current() -> Result<()> {
 pub fn use_context(name: &str) -> Result<()> {
     let mut ctx_cfg = config::load_context_config()?;
     if !ctx_cfg.contexts.contains_key(name) {
-        anyhow::bail!("context '{}' not found. Run `ailsd context list` to see available contexts.", name);
+        anyhow::bail!(
+            "context '{}' not found. Run `ailsd context list` to see available contexts.",
+            name
+        );
     }
     ctx_cfg.current_context = name.to_string();
     config::save_context_config(&ctx_cfg)?;
@@ -123,7 +125,11 @@ pub fn delete(name: &str) -> Result<()> {
 pub fn create_interactive(name: &str) -> Result<()> {
     let ctx_cfg = config::load_context_config().unwrap_or_default();
     if ctx_cfg.contexts.contains_key(name) {
-        anyhow::bail!("context '{}' already exists. Use `ailsd context show {}` or delete it first.", name, name);
+        anyhow::bail!(
+            "context '{}' already exists. Use `ailsd context show {}` or delete it first.",
+            name,
+            name
+        );
     }
     println!("Creating context '{}'...\n", name);
     let cfg = crate::run_configure_inner(None).context("configuration failed")?;

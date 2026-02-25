@@ -1,4 +1,4 @@
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -7,7 +7,7 @@ use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::{execute, queue};
 
-use crate::api::{get_messages, Thread};
+use crate::api::{Thread, get_messages};
 use crate::ui::styles::system_text;
 
 struct TerminalGuard;
@@ -45,7 +45,11 @@ pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Esc => return Ok(None),
-                KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
                     return Ok(None);
                 }
                 KeyCode::Up => {
@@ -74,7 +78,11 @@ pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
 
 fn render_picker(origin: (u16, u16), threads: &[Thread], cursor: usize) -> Result<()> {
     let mut out = stdout();
-    queue!(out, MoveTo(origin.0, origin.1), Clear(ClearType::FromCursorDown))?;
+    queue!(
+        out,
+        MoveTo(origin.0, origin.1),
+        Clear(ClearType::FromCursorDown)
+    )?;
     writeln!(out, "Select a thread to resume:\n")?;
 
     for (i, thread) in threads.iter().enumerate() {

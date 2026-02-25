@@ -48,7 +48,10 @@ contexts:
     let ctx: ContextConfig = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(ctx.current_context, "production");
     assert_eq!(ctx.contexts.len(), 2);
-    assert_eq!(ctx.contexts["production"].endpoint, "https://prod.langgraph.app");
+    assert_eq!(
+        ctx.contexts["production"].endpoint,
+        "https://prod.langgraph.app"
+    );
     assert_eq!(ctx.contexts["default"].assistant_id, "docs_agent");
 }
 

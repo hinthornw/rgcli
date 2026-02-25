@@ -1,13 +1,13 @@
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
+use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
-use crate::api::{get_messages, Thread};
+use crate::api::{Thread, get_messages};
 use crate::ui::styles::system_text;
 
 pub fn pick_thread(threads: &[Thread]) -> Result<Option<Thread>> {
@@ -38,7 +38,9 @@ fn pick_thread_inner(threads: &[Thread]) -> Result<Option<Thread>> {
             match key.code {
                 KeyCode::Esc => return Ok(None),
                 KeyCode::Char('c')
-                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
                 {
                     return Ok(None);
                 }

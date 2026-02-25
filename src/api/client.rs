@@ -101,6 +101,7 @@ impl Client {
         Ok(resp.json::<ThreadState>().await?)
     }
 
+    #[allow(dead_code)]
     pub async fn get_thread(&self, thread_id: &str, select_fields: &[&str]) -> Result<Thread> {
         let mut url = format!("{}/threads/{}", self.endpoint, thread_id);
         if !select_fields.is_empty() {
@@ -218,6 +219,30 @@ impl Client {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("failed to get info: {} - {}", status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// Get project details from LangSmith API (for hosted deployments).
+    pub async fn get_project_details(
+        &self,
+        project_id: &str,
+        tenant_id: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!("https://api.smith.langchain.com/v1/projects/{}", project_id);
+        let resp = self
+            .http
+            .get(url)
+            .headers(self.headers.clone())
+            .header("X-Tenant-Id", tenant_id)
+            .send()
+            .await?;
+
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("failed to get project details: {} - {}", status, body);
         }
 
         Ok(resp.json().await?)

@@ -5,6 +5,8 @@ use serde_json::Value;
 pub struct Message {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +130,7 @@ pub fn get_messages(values: &Value) -> Vec<Message> {
         return Vec::new();
     };
 
-    let mut result = Vec::new();
+    let mut result: Vec<Message> = Vec::new();
     for msg in messages {
         let Some(obj) = msg.as_object() else {
             continue;
@@ -160,7 +162,22 @@ pub fn get_messages(values: &Value) -> Vec<Message> {
             _ => String::new(),
         };
         if !role.is_empty() && !content.is_empty() {
-            result.push(Message { role, content });
+            let msg_id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            // Merge with previous message if same non-empty ID
+            if !msg_id.is_empty() {
+                if let Some(last) = result.last_mut() {
+                    if last.id == msg_id {
+                        last.content.push_str("\n\n");
+                        last.content.push_str(&content);
+                        continue;
+                    }
+                }
+            }
+            result.push(Message {
+                role,
+                content,
+                id: msg_id.to_string(),
+            });
         }
     }
     result

@@ -56,6 +56,16 @@ enum ChatMessage {
     Error(String),
 }
 
+#[derive(Clone)]
+struct CompletionItem {
+    /// Text inserted when selected
+    insert: String,
+    /// Display label
+    label: String,
+    /// Description shown next to label
+    desc: String,
+}
+
 struct App {
     messages: Vec<ChatMessage>,
     scroll_offset: u16,
@@ -76,7 +86,7 @@ struct App {
     last_esc_at: Option<Instant>,
 
     // Completions
-    completions: Vec<usize>,
+    completions: Vec<CompletionItem>,
     completion_idx: usize,
     show_complete: bool,
 
@@ -86,8 +96,7 @@ struct App {
     update_rx: Option<mpsc::UnboundedReceiver<String>>,
     context_name: String,
     welcome_lines: Vec<Line<'static>>,
-    thread_id: String,
-
+    context_names: Vec<String>,
     // Dev toolbar
     devtools: bool,
     metrics: RunMetrics,
@@ -134,7 +143,7 @@ impl App {
             update_rx: Some(update_rx),
             context_name: context_name.to_string(),
             welcome_lines: Vec::new(),
-            thread_id: String::new(),
+            context_names: Vec::new(),
             devtools: false,
             metrics: RunMetrics::default(),
         }
@@ -150,6 +159,7 @@ pub struct ChatConfig {
     pub endpoint: String,
     pub config_path: String,
     pub context_info: String,
+    pub context_names: Vec<String>,
 }
 
 pub async fn run_chat_loop(
@@ -176,7 +186,34 @@ pub async fn run_chat_loop(
             } else if let Some(v) = info.get("version").and_then(|v| v.as_str()) {
                 parts.push(format!("api: {v}"));
             }
-            if parts.is_empty() { None } else { Some(parts.join(" | ")) }
+
+            // Try to fetch richer project details from LangSmith
+            if let (Some(project_id), Some(tenant_id)) = (
+                info.get("host")
+                    .and_then(|h| h.get("project_id"))
+                    .and_then(|v| v.as_str()),
+                info.get("host")
+                    .and_then(|h| h.get("tenant_id"))
+                    .and_then(|v| v.as_str()),
+            ) {
+                if let Ok(project) = client.get_project_details(project_id, tenant_id).await {
+                    if let Some(name) = project.get("name").and_then(|v| v.as_str()) {
+                        parts.push(name.to_string());
+                    }
+                    if let Some(status) = project.get("status").and_then(|v| v.as_str()) {
+                        parts.push(status.to_string());
+                    }
+                    if let Some(branch) = project.get("repo_branch").and_then(|v| v.as_str()) {
+                        parts.push(format!("branch: {branch}"));
+                    }
+                }
+            }
+
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" | "))
+            }
         }
         Err(_) => None,
     };
@@ -189,6 +226,7 @@ pub async fn run_chat_loop(
         &chat_config.context_info,
         deploy_info.as_deref(),
     );
+    app.context_names = chat_config.context_names.clone();
 
     // Load history
     for msg in history {
@@ -471,17 +509,16 @@ fn render_input(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
             .completions
             .iter()
             .enumerate()
-            .map(|(i, &idx)| {
-                let cmd = &SLASH_COMMANDS[idx];
+            .map(|(i, item)| {
                 if i == app.completion_idx {
                     Line::from(vec![
-                        Span::styled(format!(" > {} ", cmd.name), styles::user_style()),
-                        Span::styled(cmd.desc, styles::system_style_r()),
+                        Span::styled(format!(" > {} ", item.label), styles::user_style()),
+                        Span::styled(item.desc.clone(), styles::system_style_r()),
                     ])
                 } else {
                     Line::from(vec![
-                        Span::raw(format!("   {} ", cmd.name)),
-                        Span::styled(cmd.desc, styles::system_style_r()),
+                        Span::raw(format!("   {} ", item.label)),
+                        Span::styled(item.desc.clone(), styles::system_style_r()),
                     ])
                 }
             })
@@ -523,10 +560,7 @@ fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
                     let tps = (app.metrics.token_count - 1) as f64 / stream_dur;
                     parts.push(Span::raw(format!("{:.0} tok/s ", tps)));
                 }
-                parts.push(Span::raw(format!(
-                    "tokens: {} ",
-                    app.metrics.token_count
-                )));
+                parts.push(Span::raw(format!("tokens: {} ", app.metrics.token_count)));
             } else {
                 parts.push(Span::raw(format!("waiting: {}ms ", elapsed)));
             }
@@ -546,9 +580,17 @@ fn render_devtools(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         }
     }
 
-    if let Some(rid) = app.metrics.run_id.as_deref().or(app.metrics.last_run_id.as_deref()) {
+    if let Some(rid) = app
+        .metrics
+        .run_id
+        .as_deref()
+        .or(app.metrics.last_run_id.as_deref())
+    {
         let short = if rid.len() > 8 { &rid[..8] } else { rid };
-        parts.push(Span::styled(format!("run:{short}"), styles::system_style_r()));
+        parts.push(Span::styled(
+            format!("run:{short}"),
+            styles::system_style_r(),
+        ));
     }
 
     let line = Line::from(parts);
@@ -850,7 +892,7 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
             app.devtools = !app.devtools;
         }
         KeyCode::Tab => {
-            update_completions(&app.textarea, &mut app.completions, &mut app.show_complete);
+            update_completions(app);
             if app.show_complete {
                 app.completion_idx = 0;
             }
@@ -862,7 +904,7 @@ fn handle_terminal_event(app: &mut App, event: Event) -> Action {
         }
     }
 
-    update_completions(&app.textarea, &mut app.completions, &mut app.show_complete);
+    update_completions(app);
     Action::None
 }
 
@@ -878,8 +920,8 @@ fn handle_completion_key(key: &KeyEvent, app: &mut App) -> Option<Action> {
             Some(Action::None)
         }
         KeyCode::Enter => {
-            let cmd = SLASH_COMMANDS[app.completions[app.completion_idx]].name;
-            app.textarea = TextArea::from([cmd.to_string()]);
+            let insert = app.completions[app.completion_idx].insert.clone();
+            app.textarea = TextArea::from([insert]);
             app.textarea.move_cursor(CursorMove::End);
             app.show_complete = false;
             Some(Action::None)
@@ -905,21 +947,49 @@ fn collect_input(textarea: &TextArea) -> String {
         .to_string()
 }
 
-fn update_completions(textarea: &TextArea, completions: &mut Vec<usize>, show_complete: &mut bool) {
-    let value: String = textarea
+fn update_completions(app: &mut App) {
+    let value: String = app
+        .textarea
         .lines()
         .iter()
         .map(|l| l.to_string())
         .collect::<Vec<_>>()
         .join("\n");
     if !value.starts_with('/') || value.contains('\n') {
-        completions.clear();
-        *show_complete = false;
+        app.completions.clear();
+        app.show_complete = false;
         return;
     }
-    let matches = slash_completions(&value);
-    *show_complete = !matches.is_empty();
-    *completions = matches;
+
+    // Check if user is typing `/context <prefix>`
+    if let Some(prefix) = value.strip_prefix("/context ") {
+        let prefix = prefix.to_lowercase();
+        let matches: Vec<CompletionItem> = app
+            .context_names
+            .iter()
+            .filter(|name| name.to_lowercase().starts_with(&prefix))
+            .map(|name| CompletionItem {
+                insert: format!("/context {name}"),
+                label: name.clone(),
+                desc: "switch context".to_string(),
+            })
+            .collect();
+        app.show_complete = !matches.is_empty();
+        app.completions = matches;
+        return;
+    }
+
+    let matches: Vec<CompletionItem> = SLASH_COMMANDS
+        .iter()
+        .filter(|cmd| cmd.name.starts_with(&value))
+        .map(|cmd| CompletionItem {
+            insert: cmd.name.to_string(),
+            label: cmd.name.to_string(),
+            desc: cmd.desc.to_string(),
+        })
+        .collect();
+    app.show_complete = !matches.is_empty();
+    app.completions = matches;
 }
 
 fn to_textarea_input(key: KeyEvent) -> Option<Input> {
@@ -999,29 +1069,37 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
 fn reset_textarea(app: &mut App) {
     app.textarea = TextArea::default();
     app.textarea.set_placeholder_text(PLACEHOLDER);
-    app.textarea.set_cursor_line_style(ratatui::style::Style::default());
+    app.textarea
+        .set_cursor_line_style(ratatui::style::Style::default());
 }
 
 fn show_help(app: &mut App) {
-    app.messages.push(ChatMessage::System("Commands:".to_string()));
+    app.messages
+        .push(ChatMessage::System("Commands:".to_string()));
     for cmd in SLASH_COMMANDS {
-        app.messages.push(ChatMessage::System(format!("  {:<16} {}", cmd.name, cmd.desc)));
+        app.messages.push(ChatMessage::System(format!(
+            "  {:<16} {}",
+            cmd.name, cmd.desc
+        )));
     }
     app.messages.push(ChatMessage::System(String::new()));
     app.messages.push(ChatMessage::System("Keys:".to_string()));
-    app.messages.push(ChatMessage::System("  Enter          Send message".to_string()));
-    app.messages.push(ChatMessage::System("  Alt+Enter      Insert newline".to_string()));
-    app.messages.push(ChatMessage::System("  Esc Esc        Cancel active run".to_string()));
-    app.messages.push(ChatMessage::System("  Ctrl+C Ctrl+C  Quit".to_string()));
-    app.messages.push(ChatMessage::System("  PageUp/Down    Scroll chat history".to_string()));
-    app.messages.push(ChatMessage::System("  F12            Toggle devtools".to_string()));
+    app.messages.push(ChatMessage::System(
+        "  Enter          Send message".to_string(),
+    ));
+    app.messages.push(ChatMessage::System(
+        "  Alt+Enter      Insert newline".to_string(),
+    ));
+    app.messages.push(ChatMessage::System(
+        "  Esc Esc        Cancel active run".to_string(),
+    ));
+    app.messages
+        .push(ChatMessage::System("  Ctrl+C Ctrl+C  Quit".to_string()));
+    app.messages.push(ChatMessage::System(
+        "  PageUp/Down    Scroll chat history".to_string(),
+    ));
+    app.messages.push(ChatMessage::System(
+        "  F12            Toggle devtools".to_string(),
+    ));
     app.auto_scroll = true;
-}
-
-fn slash_completions(text: &str) -> Vec<usize> {
-    SLASH_COMMANDS
-        .iter()
-        .enumerate()
-        .filter_map(|(i, cmd)| cmd.name.starts_with(text).then_some(i))
-        .collect()
 }

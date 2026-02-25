@@ -306,11 +306,15 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
         (thread.thread_id, Vec::new())
     };
 
+    let ctx_cfg = config::load_context_config().unwrap_or_default();
+    let context_names: Vec<String> = ctx_cfg.contexts.keys().cloned().collect();
+
     let mut chat_config = ui::ChatConfig {
         version: version_string(),
         endpoint: cfg.endpoint.clone(),
         config_path,
         context_info,
+        context_names,
     };
 
     loop {
@@ -360,10 +364,7 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 }
             }
             ui::ChatExit::Quit => {
-                println!(
-                    "To resume this thread:\n  ailsd --thread-id {}",
-                    thread_id
-                );
+                println!("To resume this thread:\n  ailsd --thread-id {}", thread_id);
                 return Ok(());
             }
         }

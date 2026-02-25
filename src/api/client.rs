@@ -16,6 +16,8 @@ use crate::config::Config;
 pub enum StreamEvent {
     /// Run ID extracted from metadata event.
     RunStarted(String),
+    /// A new AI message started (different message ID).
+    NewMessage(String),
     /// A text token from the assistant.
     Token(String),
     /// Stream completed (Ok or Err).
@@ -172,7 +174,8 @@ impl Client {
         }
 
         let stream = resp.bytes_stream();
-        parse_sse(stream, |event| handle_sse(event, tx))
+        let mut current_msg_id: Option<String> = None;
+        parse_sse(stream, |event| handle_sse(event, tx, &mut current_msg_id))
             .await
             .context("failed to parse SSE stream")?;
 
@@ -291,7 +294,11 @@ impl Client {
     }
 }
 
-fn handle_sse(event: SseEvent, tx: &mpsc::UnboundedSender<StreamEvent>) {
+fn handle_sse(
+    event: SseEvent,
+    tx: &mpsc::UnboundedSender<StreamEvent>,
+    current_msg_id: &mut Option<String>,
+) {
     if is_end_event(&event) {
         return;
     }
@@ -313,6 +320,18 @@ fn handle_sse(event: SseEvent, tx: &mpsc::UnboundedSender<StreamEvent>) {
     if !is_ai_chunk(&chunk) {
         return;
     }
+
+    // Detect new message by ID change
+    if let Some(id) = &chunk.id {
+        if current_msg_id.as_ref() != Some(id) {
+            if current_msg_id.is_some() {
+                // A previous message existed — signal new message boundary
+                let _ = tx.send(StreamEvent::NewMessage(id.clone()));
+            }
+            *current_msg_id = Some(id.clone());
+        }
+    }
+
     let content = message_chunk_content(&chunk);
     if !content.is_empty() {
         let _ = tx.send(StreamEvent::Token(content));

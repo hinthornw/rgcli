@@ -45,6 +45,8 @@ pub struct ThreadState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessageChunk {
     #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub content: Option<Value>,
     #[serde(rename = "type")]
     pub chunk_type: Option<String>,

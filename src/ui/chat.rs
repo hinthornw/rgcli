@@ -675,6 +675,13 @@ fn handle_stream_event(
             app.active_run_id = Some(id.clone());
             app.metrics.run_id = Some(id);
         }
+        StreamEvent::NewMessage(_id) => {
+            // Flush current streaming text as a completed message
+            if !app.streaming_text.is_empty() {
+                let text = std::mem::take(&mut app.streaming_text);
+                app.messages.push(ChatMessage::Assistant(text));
+            }
+        }
         StreamEvent::Token(token) => {
             if app.metrics.first_token_at.is_none() {
                 app.metrics.first_token_at = Some(Instant::now());

@@ -190,6 +190,9 @@ pub(super) fn show_help(app: &mut ChatState) {
         "  Ctrl+F         Search (↑/↓ to navigate matches)".to_string(),
     ));
     app.messages.push(ChatMessage::System(
+        "  Ctrl+B [       Enter scroll mode (tmux-style)".to_string(),
+    ));
+    app.messages.push(ChatMessage::System(
         "  PageUp/Down    Scroll chat history".to_string(),
     ));
     app.messages.push(ChatMessage::System(

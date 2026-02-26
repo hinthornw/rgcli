@@ -5,7 +5,7 @@ use tui_textarea::{CursorMove, Input, Key, TextArea};
 
 use super::{
     Action, CTRL_C_TIMEOUT, ChatExit, ChatMessage, ChatState, CompletionItem, ESC_TIMEOUT,
-    MAX_INPUT_LINES, PLACEHOLDER,
+    MAX_INPUT_LINES, PLACEHOLDER, PREFIX_TIMEOUT,
 };
 
 struct SlashCommand {
@@ -93,6 +93,70 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         }
     }
 
+    if let Some(start) = app.prefix_at {
+        if start.elapsed() > PREFIX_TIMEOUT {
+            app.prefix_at = None;
+        }
+    }
+
+    // Handle scroll mode (tmux-style Ctrl+B [)
+    if app.scroll_mode {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.scroll_mode = false;
+                app.scroll_offset = 0;
+                app.auto_scroll = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.auto_scroll = false;
+                app.scroll_offset = app.scroll_offset.saturating_add(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.scroll_offset > 0 {
+                    app.scroll_offset = app.scroll_offset.saturating_sub(1);
+                }
+                if app.scroll_offset == 0 {
+                    app.auto_scroll = true;
+                }
+            }
+            KeyCode::PageUp => {
+                app.auto_scroll = false;
+                app.scroll_offset = app.scroll_offset.saturating_add(20);
+            }
+            KeyCode::PageDown => {
+                if app.scroll_offset > 20 {
+                    app.scroll_offset = app.scroll_offset.saturating_sub(20);
+                } else {
+                    app.scroll_offset = 0;
+                    app.auto_scroll = true;
+                }
+            }
+            KeyCode::Home => {
+                app.auto_scroll = false;
+                app.scroll_offset = u16::MAX;
+            }
+            KeyCode::End => {
+                app.scroll_mode = false;
+                app.scroll_offset = 0;
+                app.auto_scroll = true;
+            }
+            _ => {}
+        }
+        return Action::None;
+    }
+
+    // Check for Ctrl+B [ sequence (prefix → '[' enters scroll mode)
+    if key.code == KeyCode::Char('[') && app.prefix_at.is_some() {
+        app.prefix_at = None;
+        app.scroll_mode = true;
+        app.auto_scroll = false;
+        return Action::None;
+    }
+    // Any non-'[' key clears the prefix
+    if app.prefix_at.is_some() && key.code != KeyCode::Char('[') {
+        app.prefix_at = None;
+    }
+
     // Handle search mode
     if app.search_mode {
         match key.code {
@@ -158,6 +222,9 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             return Action::Quit;
+        }
+        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.prefix_at = Some(Instant::now());
         }
         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.search_mode = !app.search_mode;

@@ -388,7 +388,18 @@ pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area:
 }
 
 pub(super) fn render_status(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
-    if app.search_mode {
+    if app.scroll_mode {
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
+
+        let scroll_line = Line::from(Span::styled(
+            " SCROLL  ↑↓/jk line  PgUp/PgDn page  Home/End  q/Esc exit",
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
+        let scroll_bar = Paragraph::new(scroll_line).style(styles::status_bar_style());
+        frame.render_widget(scroll_bar, chunks[0]);
+
+        render_status_bar(frame, app, chunks[1]);
+    } else if app.search_mode {
         let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
         let search_text = if app.search_matches.is_empty() {

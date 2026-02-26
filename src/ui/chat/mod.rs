@@ -23,6 +23,7 @@ pub(crate) use streaming::RunMetrics;
 
 const CTRL_C_TIMEOUT: Duration = Duration::from_secs(1);
 const ESC_TIMEOUT: Duration = Duration::from_millis(500);
+const PREFIX_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_INPUT_LINES: usize = 5;
 const PLACEHOLDER: &str = "Type a message... (Alt+Enter for newline)";
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -152,6 +153,10 @@ pub struct ChatState {
     // Stream mode
     pub(crate) stream_mode: String,
 
+    // Scroll mode (tmux-style Ctrl+B [)
+    pub(crate) scroll_mode: bool,
+    pub(crate) prefix_at: Option<Instant>,
+
     // Search mode
     pub(crate) search_mode: bool,
     pub(crate) search_query: String,
@@ -201,6 +206,8 @@ impl ChatState {
             devtools: false,
             metrics: RunMetrics::default(),
             stream_mode: "messages-tuple".to_string(),
+            scroll_mode: false,
+            prefix_at: None,
             search_mode: false,
             search_query: String::new(),
             search_matches: Vec::new(),
@@ -400,7 +407,7 @@ impl ChatState {
 
     pub fn draw_in_area(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let input_height = (self.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
-        let status_height = if self.search_mode { 2 } else { 1 };
+        let status_height = if self.search_mode || self.scroll_mode { 2 } else { 1 };
 
         if self.devtools {
             let devtools_height = 4;

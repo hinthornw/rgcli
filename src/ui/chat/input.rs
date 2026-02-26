@@ -447,6 +447,10 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
 }
 
 fn handle_completion_key(key: &KeyEvent, app: &mut ChatState) -> Option<Action> {
+    if app.completions.is_empty() {
+        app.show_complete = false;
+        return None;
+    }
     match key.code {
         KeyCode::Tab | KeyCode::Down => {
             app.completion_idx = (app.completion_idx + 1) % app.completions.len();

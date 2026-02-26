@@ -67,6 +67,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Show available commands",
     },
     SlashCommand {
+        name: "/feedback",
+        desc: "Submit a feature request or bug",
+    },
+    SlashCommand {
         name: "/restart",
         desc: "Update and restart",
     },
@@ -307,6 +311,12 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             }
             if value == "/restart" {
                 return Action::ExitFor(ChatExit::Restart);
+            }
+            if value == "/feedback" || value.starts_with("/feedback ") {
+                let body = value.strip_prefix("/feedback").unwrap_or("").trim();
+                open_feedback(app, body);
+                super::helpers::reset_textarea(app);
+                return Action::None;
             }
             if value == "/clear" {
                 return Action::Clear;
@@ -574,6 +584,42 @@ fn update_completions(app: &mut ChatState) {
         .collect();
     app.show_complete = !matches.is_empty();
     app.completions = matches;
+}
+
+fn open_feedback(app: &mut ChatState, body: &str) {
+    let version = env!("CARGO_PKG_VERSION");
+    let mut url = format!(
+        "https://github.com/hinthornw/ailsd/issues/new?labels=feedback&title=&body={}",
+        urlencoding::encode(&format!(
+            "{}\n\n---\n_ailsd v{} | {} {}_",
+            body,
+            version,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        ))
+    );
+    // Truncate URL to avoid issues with long bodies
+    url.truncate(2000);
+
+    let opened = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&url).spawn()
+    };
+
+    match opened {
+        Ok(_) => {
+            app.messages.push(ChatMessage::System(
+                "Opened feedback form in browser.".to_string(),
+            ));
+        }
+        Err(_) => {
+            app.messages.push(ChatMessage::System(format!(
+                "Open this URL to submit feedback:\n{url}"
+            )));
+        }
+    }
+    app.auto_scroll = true;
 }
 
 fn yank_last_response(app: &mut ChatState) {

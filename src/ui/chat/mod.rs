@@ -52,6 +52,11 @@ const TIPS: &[&str] = &[
     "Double-tap Esc to cancel a streaming response",
     "Use /export to save the conversation as markdown",
     "Press Ctrl+B to navigate between screens (threads, runs, store...)",
+    "Use /feedback to submit a feature request or bug report",
+    "Press y to copy the last assistant response to clipboard",
+    "Press +/- after a response to rate it with thumbs up/down",
+    "Ctrl+B [ enters scroll mode for browsing chat history",
+    "Use /restart to update and relaunch without losing your thread",
 ];
 
 #[derive(Debug)]

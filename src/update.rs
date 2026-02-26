@@ -208,8 +208,7 @@ pub fn pending_update_notice() -> Option<String> {
     let current = current_version();
     if is_newer(latest, &current) {
         Some(format!(
-            "Update available: {latest} (current: v{current}). Run `ailsd upgrade` to update.",
-            current = current.strip_prefix('v').unwrap_or(&current),
+            "Update {latest} available! /restart to update",
         ))
     } else {
         None

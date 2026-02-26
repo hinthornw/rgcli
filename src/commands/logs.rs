@@ -18,7 +18,7 @@ pub async fn show(
 
     // If a thread is given, show its recent runs
     if let Some(tid) = thread_id {
-        let url = format!("{}/threads/{}/runs", client.endpoint(), tid);
+        let url = format!("{}/threads/{}/runs/search", client.endpoint(), tid);
         let body = serde_json::json!({ "limit": last_n });
         let resp = client.post_json(&url, &body).await?;
         let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
@@ -44,7 +44,7 @@ pub async fn show(
         let tid_short: String = thread.thread_id.chars().take(8).collect();
         println!("\x1b[1;36mThread {tid_short}\x1b[0m");
 
-        let url = format!("{}/threads/{}/runs", client.endpoint(), thread.thread_id);
+        let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread.thread_id);
         let body = serde_json::json!({ "limit": 3 });
         match client.post_json(&url, &body).await {
             Ok(resp) => {

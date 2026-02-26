@@ -61,7 +61,7 @@ impl RunsScreen {
         tokio::spawn(async move {
             if let Some(tid) = &thread_filter {
                 // Show runs for a specific thread
-                let url = format!("{}/threads/{}/runs", client.endpoint(), tid);
+                let url = format!("{}/threads/{}/runs/search", client.endpoint(), tid);
                 let body = serde_json::json!({ "limit": 50 });
                 match client.post_json(&url, &body).await {
                     Ok(resp) => {
@@ -99,7 +99,7 @@ impl RunsScreen {
                         for thread in &threads {
                             let tid_short: String = thread.thread_id.chars().take(8).collect();
                             let url =
-                                format!("{}/threads/{}/runs", client.endpoint(), thread.thread_id);
+                                format!("{}/threads/{}/runs/search", client.endpoint(), thread.thread_id);
                             let body = serde_json::json!({ "limit": 5 });
                             if let Ok(resp) = client.post_json(&url, &body).await {
                                 let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);

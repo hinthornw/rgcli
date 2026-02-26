@@ -17,7 +17,7 @@ fn shorten_id(id: &str) -> String {
 }
 
 pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> {
-    let url = format!("{}/threads/{}/runs", client.endpoint(), thread_id);
+    let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread_id);
     let body = serde_json::json!({ "limit": limit });
     let resp = client.post_json(&url, &body).await?;
 
@@ -78,7 +78,7 @@ pub async fn watch(client: &Client, thread_id: &str, interval_secs: u64) -> Resu
         std::io::stdout().flush()?;
 
         // Fetch runs
-        let url = format!("{}/threads/{}/runs", client.endpoint(), thread_id);
+        let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread_id);
         let body = serde_json::json!({ "limit": 20 });
 
         match client.post_json(&url, &body).await {

@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -31,7 +33,14 @@ fn on(fg_c: Color, bg_c: Color) -> Style {
 pub enum ParrotState {
     Idle,
     Typing,
+    Curious,      // typing long input (>30 chars)
+    SlashCommand, // typing a / command
     Thinking,
+    FeedbackHappy,
+    FeedbackSad,
+    Error,
+    Sleeping,
+    Interrupted,
     Threads,
     Assistants,
     Runs,
@@ -45,7 +54,8 @@ pub struct Parrot {
     state: ParrotState,
     frame: usize,
     tick: usize,
-    rng: u32, // simple xorshift rng state
+    rng: u32,
+    state_expires: Option<Instant>,
 }
 
 impl Parrot {
@@ -55,6 +65,7 @@ impl Parrot {
             frame: 0,
             tick: 0,
             rng: 0xDEAD_BEEF,
+            state_expires: None,
         }
     }
 
@@ -63,7 +74,34 @@ impl Parrot {
             self.state = state;
             self.frame = 0;
             self.tick = 0;
+            self.state_expires = None;
         }
+    }
+
+    pub fn set_timed_state(&mut self, state: ParrotState, duration: Duration) {
+        self.state = state;
+        self.state_expires = Some(Instant::now() + duration);
+        self.frame = 0;
+        self.tick = 0;
+    }
+
+    pub fn check_expiry(&mut self) {
+        if let Some(expires) = self.state_expires {
+            if Instant::now() >= expires {
+                self.state_expires = None;
+                self.state = ParrotState::Idle;
+                self.frame = 0;
+                self.tick = 0;
+            }
+        }
+    }
+
+    pub fn has_timed_state(&self) -> bool {
+        self.state_expires.is_some()
+    }
+
+    pub fn current_state(&self) -> &ParrotState {
+        &self.state
     }
 
     /// Simple xorshift PRNG — returns a pseudo-random u32.
@@ -78,8 +116,11 @@ impl Parrot {
         self.tick += 1;
         let base_speed = match self.state {
             ParrotState::Thinking => 4,
-            ParrotState::Idle => 6, // ~480ms per frame — visible dance
+            ParrotState::Idle => 6,
             ParrotState::Runs => 5,
+            ParrotState::Sleeping => 12, // slow Z animation
+            ParrotState::FeedbackHappy | ParrotState::FeedbackSad => 3, // fast celebration
+            ParrotState::Error => 3,
             _ => 10,
         };
         if self.tick % base_speed == 0 {
@@ -94,8 +135,35 @@ impl Parrot {
     pub fn render(&mut self) -> Vec<Line<'static>> {
         match self.state {
             ParrotState::Idle => self.render_idle(),
-            ParrotState::Typing => self.render_typing(),
+            ParrotState::Typing | ParrotState::Curious | ParrotState::SlashCommand => {
+                self.render_typing()
+            }
             ParrotState::Thinking => self.render_thinking(),
+            ParrotState::FeedbackHappy => kawaii_parrot(Pose {
+                eyes: Eyes::Happy,
+                bounce: self.frame % 2 == 0,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Up,
+                ..Pose::default()
+            }),
+            ParrotState::FeedbackSad => kawaii_parrot(Pose {
+                eyes: Eyes::Normal,
+                tilt: if self.frame % 2 == 0 { -1 } else { 0 },
+                ..Pose::default()
+            }),
+            ParrotState::Error => kawaii_parrot(Pose {
+                eyes: Eyes::Sparkle, // reuse sparkle as "shocked"
+                bounce: self.frame % 2 == 0,
+                ..Pose::default()
+            }),
+            ParrotState::Sleeping => kawaii_parrot(Pose {
+                eyes: Eyes::Happy, // closed eyes
+                ..Pose::default()
+            }),
+            ParrotState::Interrupted => kawaii_parrot(Pose {
+                eyes: Eyes::Normal,
+                ..Pose::default()
+            }),
             ParrotState::Threads => kawaii_parrot(Pose::default()),
             ParrotState::Assistants => kawaii_parrot(Pose::default()),
             ParrotState::Runs => self.render_runs(),
@@ -103,6 +171,65 @@ impl Parrot {
             ParrotState::Crons => kawaii_parrot(Pose::default()),
             ParrotState::Logs => kawaii_parrot(Pose::default()),
             ParrotState::Deployments => kawaii_parrot(Pose::default()),
+        }
+    }
+
+    /// Compact 1-line face for the status bar.
+    pub fn mini_face(&mut self) -> Span<'static> {
+        let face_style = Style::default().fg(GREEN_LT);
+        let happy_style = Style::default().fg(Color::Rgb(100, 220, 120));
+        let sad_style = Style::default().fg(Color::Rgb(180, 180, 100));
+        let error_style = Style::default().fg(Color::Rgb(255, 100, 100));
+        let sleep_style = Style::default().fg(Color::Rgb(120, 120, 160));
+        let sparkle_style = Style::default().fg(Color::Rgb(255, 220, 100));
+
+        match &self.state {
+            ParrotState::Idle => {
+                let faces = ["(◕‿◕)", "(◡‿◡)", "(✦‿✦)"];
+                Span::styled(faces[self.frame % faces.len()].to_string(), face_style)
+            }
+            ParrotState::Typing => Span::styled("(◕_◕)", face_style),
+            ParrotState::Curious => {
+                let faces = ["(◕◕)…", "(◕◕)‥"];
+                Span::styled(faces[self.frame % faces.len()].to_string(), face_style)
+            }
+            ParrotState::SlashCommand => Span::styled("(✦‿✦)/", sparkle_style),
+            ParrotState::Thinking => {
+                let dots = match self.frame % 4 {
+                    0 => "(✦‿✦).",
+                    1 => "(✦‿✦)..",
+                    2 => "(✦‿✦)...",
+                    _ => "(✦‿✦)",
+                };
+                Span::styled(dots.to_string(), sparkle_style)
+            }
+            ParrotState::FeedbackHappy => {
+                let s = if self.frame % 2 == 0 {
+                    "(◕‿◕)♡"
+                } else {
+                    "(◡‿◡)♡"
+                };
+                Span::styled(s.to_string(), happy_style)
+            }
+            ParrotState::FeedbackSad => Span::styled("(◕︵◕)", sad_style),
+            ParrotState::Error => {
+                let s = if self.frame % 2 == 0 {
+                    "(°□°)!"
+                } else {
+                    "(°□°) "
+                };
+                Span::styled(s.to_string(), error_style)
+            }
+            ParrotState::Sleeping => {
+                let zs = match self.frame % 3 {
+                    0 => "(-_-)ᶻ",
+                    1 => "(-_-)ᶻᶻ",
+                    _ => "(-_-)ᶻᶻᶻ",
+                };
+                Span::styled(zs.to_string(), sleep_style)
+            }
+            ParrotState::Interrupted => Span::styled("(◕_◕)⏸", face_style),
+            _ => Span::styled("(◕‿◕)", face_style),
         }
     }
 
@@ -289,8 +416,8 @@ enum WingPos {
 
 struct Pose {
     eyes: Eyes,
-    bounce: bool,    // shift body up (add padding at bottom)
-    tilt: i8,        // -1 = lean left, 0 = center, 1 = lean right
+    bounce: bool, // shift body up (add padding at bottom)
+    tilt: i8,     // -1 = lean left, 0 = center, 1 = lean right
     wing_left: WingPos,
     wing_right: WingPos,
     foot_left: bool,  // show left foot
@@ -438,12 +565,7 @@ fn kawaii_parrot(pose: Pose) -> Vec<Line<'static>> {
         } else {
             Span::raw(" ")
         };
-        Line::from(vec![
-            Span::raw(pad(3)),
-            lf,
-            Span::raw("   "),
-            rf,
-        ])
+        Line::from(vec![Span::raw(pad(3)), lf, Span::raw("   "), rf])
     };
 
     // If bouncing, add empty line at top to keep 8 lines total

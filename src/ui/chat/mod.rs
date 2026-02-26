@@ -169,6 +169,7 @@ pub struct ChatState {
 
     // Mascot
     pub(crate) parrot: Parrot,
+    pub(crate) last_interaction: Instant,
 
     // Thread history loading
     pub(crate) history_rx: Option<mpsc::UnboundedReceiver<crate::api::types::ThreadState>>,
@@ -218,6 +219,7 @@ impl ChatState {
             search_matches: Vec::new(),
             search_match_idx: 0,
             parrot: Parrot::new(),
+            last_interaction: Instant::now(),
             history_rx: None,
         }
     }
@@ -386,12 +388,32 @@ impl ChatState {
         if self.is_streaming() {
             self.spinner_idx += 1;
         }
-        if self.is_waiting || self.is_streaming() {
-            self.parrot.set_state(ParrotState::Thinking);
-        } else if !input::collect_input(&self.textarea).is_empty() {
-            self.parrot.set_state(ParrotState::Typing);
-        } else {
-            self.parrot.set_state(ParrotState::Idle);
+
+        // Check timed state expiry (feedback celebration, error shock)
+        self.parrot.check_expiry();
+
+        // Don't override timed states (they auto-revert)
+        if !self.parrot.has_timed_state() {
+            if self.is_waiting || self.is_streaming() {
+                self.parrot.set_state(ParrotState::Thinking);
+            } else if self.interrupted {
+                self.parrot.set_state(ParrotState::Interrupted);
+            } else {
+                let input_text = input::collect_input(&self.textarea);
+                if !input_text.is_empty() {
+                    if input_text.starts_with('/') {
+                        self.parrot.set_state(ParrotState::SlashCommand);
+                    } else if input_text.len() > 30 {
+                        self.parrot.set_state(ParrotState::Curious);
+                    } else {
+                        self.parrot.set_state(ParrotState::Typing);
+                    }
+                } else if self.last_interaction.elapsed() > Duration::from_secs(30) {
+                    self.parrot.set_state(ParrotState::Sleeping);
+                } else {
+                    self.parrot.set_state(ParrotState::Idle);
+                }
+            }
         }
         self.parrot.tick();
     }
@@ -412,7 +434,11 @@ impl ChatState {
 
     pub fn draw_in_area(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let input_height = (self.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
-        let status_height = if self.search_mode || self.scroll_mode { 2 } else { 1 };
+        let status_height = if self.search_mode || self.scroll_mode {
+            2
+        } else {
+            1
+        };
 
         if self.devtools {
             let devtools_height = 4;
@@ -499,8 +525,7 @@ impl ChatState {
                             }
                         }
                         "tool" => {
-                            let name =
-                                msg.tool_name.clone().unwrap_or_else(|| "tool".to_string());
+                            let name = msg.tool_name.clone().unwrap_or_else(|| "tool".to_string());
                             self.messages
                                 .push(ChatMessage::ToolResult(name, msg.content.clone()));
                         }

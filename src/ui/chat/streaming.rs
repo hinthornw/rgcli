@@ -127,6 +127,10 @@ pub(super) async fn handle_stream_event(
                 crate::debug_log::log("stream", &format!("run error: {err}"));
                 app.messages
                     .push(ChatMessage::Error(format!("Error: {}", err)));
+                app.parrot.set_timed_state(
+                    crate::ui::mascot::ParrotState::Error,
+                    Duration::from_secs(3),
+                );
             } else if !app.streaming_text.is_empty() {
                 let text = std::mem::take(&mut app.streaming_text);
                 app.messages.push(ChatMessage::Assistant(text));
@@ -164,7 +168,9 @@ pub(super) async fn handle_stream_event(
             if app.devtools {
                 if let (Some(run_id), Some(tid)) = (&app.metrics.run_id, &app.tenant_id) {
                     let url = if let Some(sid) = &app.tracer_session_id {
-                        format!("https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{run_id}?trace_id={run_id}")
+                        format!(
+                            "https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{run_id}?trace_id={run_id}"
+                        )
                     } else {
                         format!("https://smith.langchain.com/o/{tid}/r/{run_id}")
                     };

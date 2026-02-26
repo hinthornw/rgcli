@@ -138,23 +138,35 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area:
                 None => {
                     lines.push(Line::from(vec![
                         Span::raw("           "),
-                        Span::styled("[+]", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "[+]",
+                            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled(" thumbs up  ", Style::new().fg(Color::DarkGray)),
-                        Span::styled("[-]", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "[-]",
+                            Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled(" thumbs down", Style::new().fg(Color::DarkGray)),
                     ]));
                 }
                 Some(true) => {
                     lines.push(Line::from(vec![
                         Span::raw("           "),
-                        Span::styled("[+] ", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "[+] ",
+                            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled("voted!", Style::new().fg(Color::Green)),
                     ]));
                 }
                 Some(false) => {
                     lines.push(Line::from(vec![
                         Span::raw("           "),
-                        Span::styled("[-] ", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "[-] ",
+                            Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled("voted!", Style::new().fg(Color::Red)),
                     ]));
                 }
@@ -387,7 +399,9 @@ pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area:
     {
         if let Some(tid) = &app.tenant_id {
             let url = if let Some(sid) = &app.tracer_session_id {
-                format!("https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{rid}?trace_id={rid}")
+                format!(
+                    "https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{rid}?trace_id={rid}"
+                )
             } else {
                 format!("https://smith.langchain.com/o/{tid}/r/{rid}")
             };
@@ -418,7 +432,7 @@ pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area:
     frame.render_widget(bar, area);
 }
 
-pub(super) fn render_status(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
+pub(super) fn render_status(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     if app.scroll_mode {
         let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
@@ -456,8 +470,9 @@ pub(super) fn render_status(frame: &mut ratatui::Frame, app: &ChatState, area: R
     }
 }
 
-fn render_status_bar(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
-    let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
+fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
+    let face = app.parrot.mini_face();
+    let mut left_parts: Vec<Span> = vec![Span::raw(" "), face, Span::raw(" "), Span::raw(&app.context_name)];
 
     left_parts.push(Span::styled(
         format!(" | {}", app.assistant_id),

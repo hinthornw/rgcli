@@ -81,6 +81,14 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         return Action::None;
     };
 
+    app.last_interaction = Instant::now();
+
+    // Wake from sleep — consume the first keypress
+    if *app.parrot.current_state() == super::super::mascot::ParrotState::Sleeping {
+        app.parrot.set_state(super::super::mascot::ParrotState::Idle);
+        return Action::None;
+    }
+
     if key.code != KeyCode::Char('c') || !key.modifiers.contains(KeyModifiers::CONTROL) {
         app.ctrl_c_at = None;
     }
@@ -177,8 +185,7 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
                 return Action::None;
             }
             KeyCode::Up | KeyCode::Char('p')
-                if key.code == KeyCode::Up
-                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                if key.code == KeyCode::Up || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 // Navigate to previous match
                 if !app.search_matches.is_empty() {
@@ -192,8 +199,7 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
                 return Action::None;
             }
             KeyCode::Down | KeyCode::Char('n')
-                if key.code == KeyCode::Down
-                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                if key.code == KeyCode::Down || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 // Navigate to next match
                 if !app.search_matches.is_empty() {
@@ -312,13 +318,16 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             if value == "/console" {
                 let lines = crate::debug_log::tail(50);
                 if lines.is_empty() {
-                    app.messages.push(ChatMessage::System("No debug log entries.".to_string()));
+                    app.messages
+                        .push(ChatMessage::System("No debug log entries.".to_string()));
                 } else {
-                    app.messages.push(ChatMessage::System("─── Debug Console ───".to_string()));
+                    app.messages
+                        .push(ChatMessage::System("─── Debug Console ───".to_string()));
                     for line in lines {
                         app.messages.push(ChatMessage::System(line));
                     }
-                    app.messages.push(ChatMessage::System("─────────────────────".to_string()));
+                    app.messages
+                        .push(ChatMessage::System("─────────────────────".to_string()));
                 }
                 app.auto_scroll = true;
                 super::helpers::reset_textarea(app);
@@ -561,8 +570,16 @@ fn update_completions(app: &mut ChatState) {
 }
 
 fn submit_feedback(app: &mut ChatState, thumbs_up: bool) {
+    use std::time::Duration;
     let score = if thumbs_up { 1 } else { 0 };
     app.feedback_submitted = Some(thumbs_up);
+    let parrot_state = if thumbs_up {
+        super::super::mascot::ParrotState::FeedbackHappy
+    } else {
+        super::super::mascot::ParrotState::FeedbackSad
+    };
+    app.parrot
+        .set_timed_state(parrot_state, Duration::from_secs(3));
     if let Some(url) = app.metrics.last_feedback_url.clone() {
         let feedback_url = format!("{}?score={}", url, score);
         tokio::spawn(async move {

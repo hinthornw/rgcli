@@ -60,6 +60,7 @@ pub enum ChatExit {
     SwitchContext(String),
     NewThread,
     Quit,
+    Restart,
     RunDoctor,
     RunBench,
 }

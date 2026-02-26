@@ -1107,6 +1107,25 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 println!("\nPress Enter to return to chat...");
                 let _ = std::io::stdin().read_line(&mut String::new());
             }
+            ui::ChatExit::Restart => {
+                println!("Checking for updates...");
+                if let Some(version) = update::auto_upgrade_if_available() {
+                    println!("Updated to {version}. Restarting...");
+                } else {
+                    println!("Already up to date. Restarting...");
+                }
+                use std::os::unix::process::CommandExt;
+                let exe = std::env::current_exe().context("failed to find executable")?;
+                let mut cmd = std::process::Command::new(&exe);
+                // Pass original args (skip argv[0]), ensure --thread-id is included
+                let orig_args: Vec<String> = std::env::args().skip(1).collect();
+                cmd.args(&orig_args);
+                if !orig_args.iter().any(|a| a == "--thread-id") {
+                    cmd.arg("--thread-id").arg(&thread_id);
+                }
+                let err = cmd.exec();
+                anyhow::bail!("failed to restart: {err}");
+            }
             ui::ChatExit::Quit => {
                 println!("To resume this thread:\n  ailsd --thread-id {}", thread_id);
                 if let Some(version) = update::auto_upgrade_if_available() {

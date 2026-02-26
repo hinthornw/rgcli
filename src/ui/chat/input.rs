@@ -67,6 +67,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Show available commands",
     },
     SlashCommand {
+        name: "/restart",
+        desc: "Update and restart",
+    },
+    SlashCommand {
         name: "/exit",
         desc: "Exit the chat",
     },
@@ -293,6 +297,9 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             }
             if value == "/bench" || value.starts_with("/bench ") {
                 return Action::ExitFor(ChatExit::RunBench);
+            }
+            if value == "/restart" {
+                return Action::ExitFor(ChatExit::Restart);
             }
             if value == "/clear" {
                 return Action::Clear;

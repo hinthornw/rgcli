@@ -8,11 +8,10 @@ use super::{ChatMessage, ChatState, SPINNER_FRAMES, THINKING_VERBS, TOOL_RESULT_
 use crate::ui::styles;
 
 pub(super) fn render_header(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
-    // Split: parrot on left (~12 cols), info on right
-    let parrot_width = 12u16;
+    // Split: parrot on left (~1/3), info on right (~2/3)
     let chunks = Layout::horizontal([
-        Constraint::Length(parrot_width),
-        Constraint::Min(20),
+        Constraint::Percentage(33),
+        Constraint::Percentage(67),
     ])
     .split(area);
 

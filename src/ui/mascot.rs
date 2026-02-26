@@ -115,7 +115,7 @@ impl Parrot {
         self.tick += 1;
         let base_speed = match self.state {
             ParrotState::Thinking => 4,
-            ParrotState::Idle => 6,
+            ParrotState::Idle => 12, // calm, slow transitions
             ParrotState::Runs => 5,
             ParrotState::Sleeping => 12, // slow Z animation
             ParrotState::FeedbackHappy | ParrotState::FeedbackSad => 3, // fast celebration
@@ -232,93 +232,68 @@ impl Parrot {
     }
 
     fn render_idle(&mut self) -> Vec<Line<'static>> {
-        // Occasionally throw in a surprise pose (~10% of frames)
-        if self.rand() % 10 == 0 {
-            let surprise = match self.rand() % 4 {
-                0 => Pose {
-                    eyes: Eyes::Sparkle,
-                    bounce: true,
-                    wing_left: WingPos::Up,
-                    wing_right: WingPos::Up,
-                    ..Pose::default()
-                },
-                1 => Pose {
-                    eyes: Eyes::Happy,
-                    tilt: -1,
-                    wing_left: WingPos::Up,
-                    foot_right: false,
-                    ..Pose::default()
-                },
-                2 => Pose {
-                    eyes: Eyes::Happy,
-                    tilt: 1,
-                    wing_right: WingPos::Up,
-                    foot_left: false,
-                    ..Pose::default()
-                },
-                _ => Pose {
-                    eyes: Eyes::Normal,
-                    bounce: true,
-                    wing_left: WingPos::Up,
-                    wing_right: WingPos::Up,
-                    foot_left: false,
-                    foot_right: false,
-                    ..Pose::default()
-                },
-            };
-            return kawaii_parrot(surprise);
-        }
-
-        // 8-frame kawaii dance cycle
-        let pose = match self.frame % 8 {
-            0 => Pose {
+        // Calm idle: 16-frame cycle
+        // Frames 0-5: sitting still (gentle blinks)
+        // Frames 6-9: gentle pace (look left, look right)
+        // Frames 10-13: sitting again
+        // Frames 14-15: rare little dance move (~1 in 4 cycles, else sit)
+        let pose = match self.frame % 16 {
+            // Sitting still — occasional blink
+            0..=2 => Pose {
                 eyes: Eyes::Normal,
                 ..Pose::default()
             },
-            1 => Pose {
-                eyes: Eyes::Happy,
-                bounce: true,
-                wing_left: WingPos::Up,
-                foot_right: false,
+            3 => Pose {
+                eyes: Eyes::Happy, // blink
                 ..Pose::default()
             },
-            2 => Pose {
+            4..=5 => Pose {
+                eyes: Eyes::Normal,
+                ..Pose::default()
+            },
+            // Gentle pace: look around
+            6 => Pose {
                 eyes: Eyes::LookLeft,
                 tilt: -1,
-                wing_left: WingPos::Up,
-                wing_right: WingPos::Down,
-                ..Pose::default()
-            },
-            3 => Pose {
-                eyes: Eyes::Happy,
-                bounce: true,
-                wing_left: WingPos::Up,
-                wing_right: WingPos::Up,
-                ..Pose::default()
-            },
-            4 => Pose {
-                eyes: Eyes::Sparkle,
-                ..Pose::default()
-            },
-            5 => Pose {
-                eyes: Eyes::Happy,
-                bounce: true,
-                wing_right: WingPos::Up,
-                foot_left: false,
-                ..Pose::default()
-            },
-            6 => Pose {
-                eyes: Eyes::LookRight,
-                tilt: 1,
-                wing_left: WingPos::Down,
-                wing_right: WingPos::Up,
                 ..Pose::default()
             },
             7 => Pose {
-                eyes: Eyes::Happy,
-                bounce: true,
-                wing_left: WingPos::Up,
-                wing_right: WingPos::Up,
+                eyes: Eyes::LookLeft,
+                ..Pose::default()
+            },
+            8 => Pose {
+                eyes: Eyes::LookRight,
+                ..Pose::default()
+            },
+            9 => Pose {
+                eyes: Eyes::LookRight,
+                tilt: 1,
+                ..Pose::default()
+            },
+            // Sitting again
+            10..=13 => Pose {
+                eyes: Eyes::Normal,
+                ..Pose::default()
+            },
+            // Rare flourish (25% chance) or just sit
+            14 => {
+                if self.rand() % 4 == 0 {
+                    Pose {
+                        eyes: Eyes::Sparkle,
+                        bounce: true,
+                        wing_left: WingPos::Up,
+                        wing_right: WingPos::Up,
+                        ..Pose::default()
+                    }
+                } else {
+                    Pose {
+                        eyes: Eyes::Happy,
+                        ..Pose::default()
+                    }
+                }
+            }
+            15 => Pose {
+                eyes: Eyes::Normal,
                 ..Pose::default()
             },
             _ => Pose::default(),

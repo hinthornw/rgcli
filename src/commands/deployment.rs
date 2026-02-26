@@ -378,11 +378,9 @@ pub fn dev(
                 if let Some(uvx) = find_uvx() {
                     RunMode::Uvx(uvx)
                 } else {
-                    return Err(
-                        "uv was installed but uvx was not found on PATH. \
+                    return Err("uv was installed but uvx was not found on PATH. \
                          Restart your shell and try again."
-                            .to_string(),
-                    );
+                        .to_string());
                 }
             } else {
                 return Err(

@@ -586,7 +586,12 @@ async fn main() -> Result<()> {
             } else {
                 let settings = config::load_settings();
                 println!("auto_update = {}", settings.auto_update);
-                println!("\nSettings file: {}", config::config_dir().map(|d| d.join("settings.yaml").to_string_lossy().to_string()).unwrap_or_else(|_| "?".to_string()));
+                println!(
+                    "\nSettings file: {}",
+                    config::config_dir()
+                        .map(|d| d.join("settings.yaml").to_string_lossy().to_string())
+                        .unwrap_or_else(|_| "?".to_string())
+                );
             }
             return Ok(());
         }
@@ -1040,7 +1045,9 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
     // Auto-resolve assistant ID: if configured ID isn't in the available list, use the first one
     let mut assistant_id = cfg.assistant_id.clone();
     if !available_assistants.is_empty()
-        && !available_assistants.iter().any(|(id, _)| *id == assistant_id)
+        && !available_assistants
+            .iter()
+            .any(|(id, _)| *id == assistant_id)
     {
         let (first_id, first_name) = &available_assistants[0];
         eprintln!(
@@ -1062,15 +1069,7 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
     };
 
     loop {
-        match ui::run_chat_loop(
-            &client,
-            &assistant_id,
-            &thread_id,
-            &history,
-            &chat_config,
-        )
-        .await?
-        {
+        match ui::run_chat_loop(&client, &assistant_id, &thread_id, &history, &chat_config).await? {
             ui::ChatExit::Configure => {
                 let context_name = config::current_context_name();
                 let new_cfg = run_configure_inner(Some(&cfg)).context("configuration failed")?;

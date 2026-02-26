@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -320,8 +320,7 @@ impl AssistantsScreen {
         }
 
         if let Some(err) = &self.detail_error {
-            let p =
-                Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+            let p = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
             frame.render_widget(p, inner);
             return;
         }
@@ -329,14 +328,8 @@ impl AssistantsScreen {
         let mut lines: Vec<Line> = Vec::new();
 
         if let Some(data) = &self.detail_data {
-            let name = data
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
-            let graph = data
-                .get("graph_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+            let graph = data.get("graph_id").and_then(|v| v.as_str()).unwrap_or("-");
             let created = data
                 .get("created_at")
                 .and_then(|v| v.as_str())
@@ -393,8 +386,8 @@ impl AssistantsScreen {
                             .fg(Color::White)
                             .add_modifier(Modifier::BOLD),
                     )));
-                    let pretty = serde_json::to_string_pretty(meta)
-                        .unwrap_or_else(|_| "{}".to_string());
+                    let pretty =
+                        serde_json::to_string_pretty(meta).unwrap_or_else(|_| "{}".to_string());
                     for line in pretty.lines() {
                         lines.push(Line::from(Span::styled(
                             format!("  {line}"),
@@ -420,16 +413,10 @@ impl AssistantsScreen {
                     .and_then(|v| v.as_i64())
                     .map(|n| format!("v{n}"))
                     .unwrap_or_else(|| "?".to_string());
-                let created = v
-                    .get("created_at")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
+                let created = v.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
                 let active = if i == 0 { " (active)" } else { "" };
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {num:<6}"),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled(format!("  {num:<6}"), Style::default().fg(Color::Cyan)),
                     Span::raw(created),
                     Span::styled(active, Style::default().fg(Color::Green)),
                 ]));
@@ -500,7 +487,10 @@ fn render_ascii_graph(graph: &Value) -> String {
             .get("conditional")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        outgoing.entry(source).or_default().push((target, conditional));
+        outgoing
+            .entry(source)
+            .or_default()
+            .push((target, conditional));
     }
 
     let mut node_ids: Vec<String> = nodes

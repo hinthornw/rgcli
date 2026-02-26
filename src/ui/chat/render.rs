@@ -7,6 +7,42 @@ use super::markdown::render_markdown_lines;
 use super::{ChatMessage, ChatState, SPINNER_FRAMES, THINKING_VERBS, TOOL_RESULT_MAX_LEN};
 use crate::ui::styles;
 
+pub(super) fn render_header(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
+    // Split: parrot on left (~12 cols), info on right
+    let parrot_width = 12u16;
+    let chunks = Layout::horizontal([
+        Constraint::Length(parrot_width),
+        Constraint::Min(20),
+    ])
+    .split(area);
+
+    // Render animated parrot sprite
+    let parrot_lines = app.parrot.render();
+    let parrot_para = Paragraph::new(parrot_lines);
+    frame.render_widget(parrot_para, chunks[0]);
+
+    // Render info lines beside the parrot
+    let title_style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let info_style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, text) in app.header_info.iter().enumerate() {
+        if i == 0 {
+            // First line: title style
+            lines.push(Line::from(Span::styled(text.clone(), title_style)));
+        } else {
+            lines.push(Line::from(Span::styled(text.clone(), info_style)));
+        }
+    }
+    // Pad to fill area height
+    while lines.len() < area.height as usize {
+        lines.push(Line::default());
+    }
+
+    let info_para = Paragraph::new(lines);
+    frame.render_widget(info_para, chunks[1]);
+}
+
 pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 

@@ -241,6 +241,9 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.prefix_at = Some(Instant::now());
         }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.show_header = !app.show_header;
+        }
         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.search_mode = !app.search_mode;
             if !app.search_mode {

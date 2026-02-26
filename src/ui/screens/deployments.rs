@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use tokio::sync::mpsc;
 
 use crate::langsmith::Deployment;
@@ -36,6 +36,10 @@ pub struct DeploymentsScreen {
     detail_loading: bool,
     detail_error: Option<String>,
     detail_scroll: u16,
+
+    // API key input mode
+    api_key_input: bool,
+    api_key_buf: String,
 }
 
 impl DeploymentsScreen {
@@ -73,6 +77,8 @@ impl DeploymentsScreen {
             detail_loading: false,
             detail_error: None,
             detail_scroll: 0,
+            api_key_input: false,
+            api_key_buf: String::new(),
         }
     }
 
@@ -91,13 +97,17 @@ impl DeploymentsScreen {
             self.context_map.insert(url, name.clone());
         }
 
-        // Get API key
-        let api_key = config::load()
+        // Get API key (check config, then env var)
+        let mut api_key = config::load()
             .map(|c| c.api_key.clone())
             .unwrap_or_default();
         if api_key.is_empty() {
-            self.table
-                .set_error("No API key configured. Set LANGSMITH_API_KEY or run ailsd configure.".to_string());
+            api_key = std::env::var("LANGSMITH_API_KEY").unwrap_or_default();
+        }
+        if api_key.is_empty() {
+            self.table.loading = false;
+            self.api_key_input = true;
+            self.api_key_buf.clear();
             return;
         }
         self.api_key = api_key.clone();
@@ -173,20 +183,15 @@ impl DeploymentsScreen {
                 match req.send().await {
                     Ok(resp) if resp.status().is_success() => {
                         if let Ok(json) = resp.json::<serde_json::Value>().await {
-                            let version = json
-                                .get("version")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("-");
+                            let version =
+                                json.get("version").and_then(|v| v.as_str()).unwrap_or("-");
                             let _ = tx.send(AsyncResult::Info(version.to_string()));
                         } else {
                             let _ = tx.send(AsyncResult::InfoError("Invalid JSON".to_string()));
                         }
                     }
                     Ok(resp) => {
-                        let _ = tx.send(AsyncResult::InfoError(format!(
-                            "HTTP {}",
-                            resp.status()
-                        )));
+                        let _ = tx.send(AsyncResult::InfoError(format!("HTTP {}", resp.status())));
                     }
                     Err(e) => {
                         let _ = tx.send(AsyncResult::InfoError(e.to_string()));
@@ -273,10 +278,8 @@ impl DeploymentsScreen {
                     if let Some(idx) = self.detail_idx {
                         if let Some(d) = self.deployments.get(idx) {
                             if let Some(url) = d.url() {
-                                self.context_map.insert(
-                                    url.trim_end_matches('/').to_string(),
-                                    name.clone(),
-                                );
+                                self.context_map
+                                    .insert(url.trim_end_matches('/').to_string(), name.clone());
                             }
                         }
                     }
@@ -295,6 +298,42 @@ impl DeploymentsScreen {
         }
         if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return ScreenAction::Quit;
+        }
+
+        // API key input mode
+        if self.api_key_input {
+            match key.code {
+                KeyCode::Esc => {
+                    self.api_key_input = false;
+                    return ScreenAction::Navigate(Screen::Chat);
+                }
+                KeyCode::Enter => {
+                    let key_val = self.api_key_buf.trim().to_string();
+                    if !key_val.is_empty() {
+                        // Save the API key to the current context's config
+                        if let Ok(mut cfg) = config::load() {
+                            cfg.api_key = key_val.clone();
+                            let ctx_name = config::current_context_name();
+                            let _ = config::save_context(&ctx_name, &cfg);
+                        }
+                        self.api_key_input = false;
+                        self.api_key_buf.clear();
+                        // Retry loading
+                        self.loaded = false;
+                        self.on_enter();
+                    }
+                    return ScreenAction::None;
+                }
+                KeyCode::Backspace => {
+                    self.api_key_buf.pop();
+                    return ScreenAction::None;
+                }
+                KeyCode::Char(c) => {
+                    self.api_key_buf.push(c);
+                    return ScreenAction::None;
+                }
+                _ => return ScreenAction::None,
+            }
         }
 
         // Detail pane keys
@@ -369,6 +408,10 @@ impl DeploymentsScreen {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+        if self.api_key_input {
+            self.render_api_key_prompt(frame, area);
+            return;
+        }
         if self.detail_idx.is_some() {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -379,6 +422,62 @@ impl DeploymentsScreen {
         } else {
             self.table.render(frame, area);
         }
+    }
+
+    fn render_api_key_prompt(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Deployments ")
+            .border_style(Style::default().fg(Color::Cyan));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let masked: String = if self.api_key_buf.is_empty() {
+            String::new()
+        } else {
+            let len = self.api_key_buf.len();
+            if len <= 4 {
+                "*".repeat(len)
+            } else {
+                format!("{}{}",
+                    "*".repeat(len - 4),
+                    &self.api_key_buf[len - 4..]
+                )
+            }
+        };
+
+        let lines = vec![
+            Line::default(),
+            Line::from(Span::styled(
+                "  Enter your LangSmith API key to view deployments.",
+                Style::default().fg(Color::White),
+            )),
+            Line::from(Span::styled(
+                "  Get one at https://smith.langchain.com/settings",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::default(),
+            Line::from(vec![
+                Span::styled("  API Key: ", Style::default().fg(Color::Cyan)),
+                Span::raw(&masked),
+                Span::styled("_", Style::default().fg(Color::White)),
+            ]),
+            Line::default(),
+            Line::from(vec![
+                Span::styled("  [Enter] ", Style::default().fg(Color::Yellow)),
+                Span::raw("Save & connect  "),
+                Span::styled("[Esc] ", Style::default().fg(Color::DarkGray)),
+                Span::raw("Cancel"),
+            ]),
+            Line::default(),
+            Line::from(Span::styled(
+                "  The key will be saved to your current context config.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(para, inner);
     }
 
     fn render_detail(&self, frame: &mut Frame, area: Rect) {

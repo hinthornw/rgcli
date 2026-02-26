@@ -98,8 +98,11 @@ impl RunsScreen {
                         let mut all_rows = Vec::new();
                         for thread in &threads {
                             let tid_short: String = thread.thread_id.chars().take(8).collect();
-                            let url =
-                                format!("{}/threads/{}/runs/search", client.endpoint(), thread.thread_id);
+                            let url = format!(
+                                "{}/threads/{}/runs/search",
+                                client.endpoint(),
+                                thread.thread_id
+                            );
                             let body = serde_json::json!({ "limit": 5 });
                             match client.post_json(&url, &body).await {
                                 Ok(resp) => {
@@ -127,7 +130,10 @@ impl RunsScreen {
                                     }
                                 }
                                 Err(e) => {
-                                    crate::debug_log::log("runs", &format!("thread {}: {e}", thread.thread_id));
+                                    crate::debug_log::log(
+                                        "runs",
+                                        &format!("thread {}: {e}", thread.thread_id),
+                                    );
                                 }
                             }
                         }

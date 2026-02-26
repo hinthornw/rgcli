@@ -35,8 +35,7 @@ pub fn log(component: &str, message: &str) {
             let secs = d.as_secs();
             let millis = d.subsec_millis();
             // Simple ISO-ish timestamp
-            let dt = chrono::DateTime::from_timestamp(secs as i64, 0)
-                .unwrap_or_default();
+            let dt = chrono::DateTime::from_timestamp(secs as i64, 0).unwrap_or_default();
             format!("{}.{millis:03}", dt.format("%H:%M:%S"))
         })
         .unwrap_or_default();
@@ -48,7 +47,10 @@ pub fn log(component: &str, message: &str) {
             if let Ok(content) = fs::read_to_string(&path) {
                 let half = content.len() / 2;
                 // Find next newline after the halfway point to avoid partial lines
-                let start = content[half..].find('\n').map(|i| half + i + 1).unwrap_or(half);
+                let start = content[half..]
+                    .find('\n')
+                    .map(|i| half + i + 1)
+                    .unwrap_or(half);
                 let _ = fs::write(&path, &content[start..]);
             }
         }

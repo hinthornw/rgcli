@@ -1,6 +1,5 @@
 use crossterm::style::Stylize;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
 
 // --- ratatui styles (for TUI rendering) ---
 
@@ -44,14 +43,3 @@ pub fn system_text(msg: &str) -> String {
     system_style(msg)
 }
 
-// --- ratatui logo (for in-TUI display) ---
-
-pub fn logo_lines(
-    version: &str,
-    endpoint: &str,
-    config_path: &str,
-    context_info: &str,
-    deploy_info: Option<&str>,
-) -> Vec<Line<'static>> {
-    super::mascot::logo_with_parrot(version, endpoint, config_path, context_info, deploy_info)
-}

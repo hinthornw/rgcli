@@ -9,15 +9,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
 use crate::api::types::Attachment;
 use crate::api::{Client, StreamEvent};
 use crate::ui::mascot::{Parrot, ParrotState};
-use crate::ui::styles;
 
 pub(crate) use streaming::RunMetrics;
 
@@ -26,6 +24,7 @@ const ESC_TIMEOUT: Duration = Duration::from_millis(500);
 const PREFIX_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_INPUT_LINES: usize = 5;
 const PLACEHOLDER: &str = "Type a message... (Alt+Enter for newline)";
+const HEADER_HEIGHT: u16 = 8; // parrot sprite height
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const THINKING_VERBS: &[&str] = &[
     "thinking",
@@ -136,6 +135,8 @@ pub struct ChatState {
     pub(crate) context_name: String,
     pub(crate) welcome_lines: Vec<Line<'static>>,
     pub(crate) context_names: Vec<String>,
+    pub(crate) header_info: Vec<String>, // lines to show beside parrot
+    pub(crate) show_header: bool,
 
     // Assistants
     pub(crate) assistant_id: String,
@@ -206,6 +207,8 @@ impl ChatState {
             context_name: context_name.to_string(),
             welcome_lines: Vec::new(),
             context_names: Vec::new(),
+            header_info: Vec::new(),
+            show_header: true,
             assistant_id: String::new(),
             available_assistants: Vec::new(),
             pending_attachments: Vec::new(),
@@ -444,10 +447,12 @@ impl ChatState {
         } else {
             1
         };
+        let header_height = if self.show_header { HEADER_HEIGHT } else { 0 };
 
         if self.devtools {
             let devtools_height = 4;
             let chunks = Layout::vertical([
+                Constraint::Length(header_height),
                 Constraint::Min(3),
                 Constraint::Length(input_height),
                 Constraint::Length(devtools_height),
@@ -455,21 +460,28 @@ impl ChatState {
             ])
             .split(area);
 
-            render::render_chat(frame, self, chunks[0]);
-            render::render_input(frame, self, chunks[1]);
-            render::render_devtools(frame, self, chunks[2]);
-            render::render_status(frame, self, chunks[3]);
+            if self.show_header {
+                render::render_header(frame, self, chunks[0]);
+            }
+            render::render_chat(frame, self, chunks[1]);
+            render::render_input(frame, self, chunks[2]);
+            render::render_devtools(frame, self, chunks[3]);
+            render::render_status(frame, self, chunks[4]);
         } else {
             let chunks = Layout::vertical([
+                Constraint::Length(header_height),
                 Constraint::Min(3),
                 Constraint::Length(input_height),
                 Constraint::Length(status_height),
             ])
             .split(area);
 
-            render::render_chat(frame, self, chunks[0]);
-            render::render_input(frame, self, chunks[1]);
-            render::render_status(frame, self, chunks[2]);
+            if self.show_header {
+                render::render_header(frame, self, chunks[0]);
+            }
+            render::render_chat(frame, self, chunks[1]);
+            render::render_input(frame, self, chunks[2]);
+            render::render_status(frame, self, chunks[3]);
         }
     }
 
@@ -656,20 +668,21 @@ pub async fn run_chat_loop(
         Err(_) => None,
     };
 
-    app.welcome_lines = styles::logo_lines(
-        &chat_config.version,
-        &chat_config.endpoint,
-        &chat_config.config_path,
-        &chat_config.context_info,
-        deploy_info.as_deref(),
-    );
-    app.welcome_lines.push(Line::default());
-    app.welcome_lines.push(Line::from(Span::styled(
-        format!("  tip: {}", helpers::random_tip()),
-        Style::new()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC),
-    )));
+    // Header info lines (shown beside parrot in persistent header)
+    app.header_info = vec![
+        format!("ailsd {}", chat_config.version),
+        chat_config.endpoint.clone(),
+        chat_config.context_info.clone(),
+        chat_config.config_path.clone(),
+    ];
+    if let Some(info) = &deploy_info {
+        app.header_info.push(info.clone());
+    }
+    app.header_info
+        .push(format!("tip: {}", helpers::random_tip()));
+
+    // Keep welcome_lines as empty — header replaces it
+    app.welcome_lines.clear();
 
     app.context_names = chat_config.context_names.clone();
 

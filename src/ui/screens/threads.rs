@@ -1,13 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use tokio::sync::mpsc;
 
-use crate::api::types::{Message, ThreadState, get_messages};
 use crate::api::Client;
+use crate::api::types::{Message, ThreadState, get_messages};
 use crate::ui::screen::{Screen, ScreenAction, ScreenContext};
 use crate::ui::widgets::resource_table::{Column, ResourceTable};
 
@@ -274,8 +274,8 @@ impl ThreadsScreen {
         }
 
         if let Some(err) = &self.detail_error {
-            let err_p = Paragraph::new(format!("Error: {err}"))
-                .style(Style::default().fg(Color::Red));
+            let err_p =
+                Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
             frame.render_widget(err_p, inner);
             return;
         }

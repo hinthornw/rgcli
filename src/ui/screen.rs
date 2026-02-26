@@ -8,7 +8,6 @@ pub enum Screen {
     Runs,
     Store,
     Crons,
-    Logs,
     Deployments,
 }
 
@@ -21,7 +20,6 @@ impl Screen {
             Screen::Runs => "Runs",
             Screen::Store => "Store",
             Screen::Crons => "Crons",
-            Screen::Logs => "Logs",
             Screen::Deployments => "Deployments",
         }
     }
@@ -34,7 +32,6 @@ impl Screen {
             Screen::Runs,
             Screen::Store,
             Screen::Crons,
-            Screen::Logs,
             Screen::Deployments,
         ]
     }

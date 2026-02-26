@@ -46,7 +46,7 @@ const TIPS: &[&str] = &[
     "Use /context <name> to switch deployment contexts on the fly",
     "Pipe mode: echo \"question\" | ailsd for non-interactive use",
     "Use ailsd bench to load test your deployment",
-    "Use ailsd logs to browse recent run traces",
+    "Use /upgrade to check for and install the latest version",
     "Use ailsd doctor to diagnose connectivity issues",
     "Double-tap Esc to cancel a streaming response",
     "Use /export to save the conversation as markdown",

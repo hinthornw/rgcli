@@ -33,7 +33,6 @@ pub struct TuiApp {
     runs: screens::RunsScreen,
     store: screens::StoreScreen,
     crons: screens::CronsScreen,
-    logs: screens::LogsScreen,
     deployments: screens::DeploymentsScreen,
 
     // Shared
@@ -53,7 +52,6 @@ impl TuiApp {
             runs: screens::RunsScreen::new(),
             store: screens::StoreScreen::new(),
             crons: screens::CronsScreen::new(),
-            logs: screens::LogsScreen::new(),
             deployments: screens::DeploymentsScreen::new(),
             client,
             thread_id,
@@ -136,7 +134,6 @@ impl TuiApp {
         self.runs.poll();
         self.store.poll();
         self.crons.poll();
-        self.logs.poll();
         self.deployments.poll();
     }
 
@@ -187,7 +184,6 @@ impl TuiApp {
             Screen::Runs => self.runs.handle_key(key, &self.client),
             Screen::Store => self.store.handle_key(key, &self.client),
             Screen::Crons => self.crons.handle_key(key, &self.client),
-            Screen::Logs => self.logs.handle_key(key, &self.client),
             Screen::Deployments => self.deployments.handle_key(key),
         };
 
@@ -265,7 +261,6 @@ impl TuiApp {
             Screen::Runs => ParrotState::Runs,
             Screen::Store => ParrotState::Store,
             Screen::Crons => ParrotState::Crons,
-            Screen::Logs => ParrotState::Logs,
             Screen::Deployments => ParrotState::Deployments,
         };
         self.chat.parrot_mut().set_state(parrot_state);
@@ -277,7 +272,6 @@ impl TuiApp {
             Screen::Runs => self.runs.on_enter(&self.client),
             Screen::Store => self.store.on_enter(&self.client),
             Screen::Crons => self.crons.on_enter(&self.client),
-            Screen::Logs => self.logs.on_enter(&self.client),
             Screen::Deployments => self.deployments.on_enter(),
         }
     }
@@ -303,7 +297,6 @@ impl TuiApp {
             Screen::Runs => self.runs.render(frame, chunks[1]),
             Screen::Store => self.store.render(frame, chunks[1]),
             Screen::Crons => self.crons.render(frame, chunks[1]),
-            Screen::Logs => self.logs.render(frame, chunks[1]),
             Screen::Deployments => self.deployments.render(frame, chunks[1]),
         }
 

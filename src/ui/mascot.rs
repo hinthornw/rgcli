@@ -46,7 +46,6 @@ pub enum ParrotState {
     Runs,
     Store,
     Crons,
-    Logs,
     Deployments,
 }
 
@@ -169,7 +168,6 @@ impl Parrot {
             ParrotState::Runs => self.render_runs(),
             ParrotState::Store => self.render_thinking(),
             ParrotState::Crons => kawaii_parrot(Pose::default()),
-            ParrotState::Logs => kawaii_parrot(Pose::default()),
             ParrotState::Deployments => kawaii_parrot(Pose::default()),
         }
     }

@@ -2,7 +2,6 @@ pub mod assistants;
 pub mod bench;
 pub mod crons;
 pub mod deployment;
-pub mod logs;
 pub mod runs;
 pub mod store;
 pub mod threads;

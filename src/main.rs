@@ -48,7 +48,6 @@ use crate::ui::print_error;
   ailsd bench --concurrent 10 --requests 50
 
   \x1b[2m# Debug runs and traces\x1b[0m
-  ailsd logs --last 10
   ailsd runs list <thread-id>
 
   \x1b[2m# Manage contexts (like kubectl)\x1b[0m
@@ -147,18 +146,6 @@ enum Command {
         /// File with inputs (one per line)
         #[arg(long)]
         input_file: Option<String>,
-    },
-    /// View run logs and traces
-    Logs {
-        /// Thread ID to show logs for
-        #[arg(long)]
-        thread: Option<String>,
-        /// Run ID to show details for
-        #[arg(long)]
-        run: Option<String>,
-        /// Show last N runs
-        #[arg(long, default_value = "5")]
-        last: usize,
     },
     /// Launch API server with Docker
     Up {
@@ -740,12 +727,6 @@ async fn main() -> Result<()> {
                 };
                 let cfg = config::load()?;
                 commands::bench::run(&client, &cfg.assistant_id, concurrent, requests, inputs).await
-            })
-            .await;
-        }
-        Some(Command::Logs { thread, run, last }) => {
-            return run_sdk_command(|client| async move {
-                commands::logs::show(&client, thread.as_deref(), run.as_deref(), last).await
             })
             .await;
         }

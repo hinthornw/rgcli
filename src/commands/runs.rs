@@ -17,11 +17,7 @@ fn shorten_id(id: &str) -> String {
 }
 
 pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> {
-    let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread_id);
-    let body = serde_json::json!({ "limit": limit });
-    let resp = client.post_json(&url, &body).await?;
-
-    let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+    let runs = client.search_runs(thread_id, limit).await?;
     if runs.is_empty() {
         println!("No runs found.");
         return Ok(());
@@ -30,8 +26,12 @@ pub async fn list(client: &Client, thread_id: &str, limit: usize) -> Result<()> 
     let mut table = Table::new();
     table.set_header(vec!["Run ID", "Status", "Created"]);
 
-    for r in runs {
-        let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+    for r in &runs {
+        let id = r
+            .get("run_id")
+            .or_else(|| r.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
         let id_short = shorten_id(id);
         let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
         let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
@@ -78,21 +78,20 @@ pub async fn watch(client: &Client, thread_id: &str, interval_secs: u64) -> Resu
         std::io::stdout().flush()?;
 
         // Fetch runs
-        let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread_id);
-        let body = serde_json::json!({ "limit": 20 });
-
-        match client.post_json(&url, &body).await {
-            Ok(resp) => {
-                let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
-
+        match client.search_runs(thread_id, 20).await {
+            Ok(runs) => {
                 if runs.is_empty() {
                     println!("No runs found for thread: {}", thread_id);
                 } else {
                     let mut table = Table::new();
                     table.set_header(vec!["Run ID", "Status", "Created"]);
 
-                    for r in runs {
-                        let id = r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+                    for r in &runs {
+                        let id = r
+                            .get("run_id")
+                            .or_else(|| r.get("id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-");
                         let id_short = shorten_id(id);
                         let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("-");
                         let created = r.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");

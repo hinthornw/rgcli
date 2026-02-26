@@ -18,15 +18,12 @@ pub async fn show(
 
     // If a thread is given, show its recent runs
     if let Some(tid) = thread_id {
-        let url = format!("{}/threads/{}/runs/search", client.endpoint(), tid);
-        let body = serde_json::json!({ "limit": last_n });
-        let resp = client.post_json(&url, &body).await?;
-        let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+        let runs = client.search_runs(tid, last_n).await?;
         if runs.is_empty() {
             println!("No runs found.");
             return Ok(());
         }
-        for run in runs {
+        for run in &runs {
             print_run_summary(run);
             println!();
         }
@@ -44,12 +41,9 @@ pub async fn show(
         let tid_short: String = thread.thread_id.chars().take(8).collect();
         println!("\x1b[1;36mThread {tid_short}\x1b[0m");
 
-        let url = format!("{}/threads/{}/runs/search", client.endpoint(), thread.thread_id);
-        let body = serde_json::json!({ "limit": 3 });
-        match client.post_json(&url, &body).await {
-            Ok(resp) => {
-                let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
-                for run in runs {
+        match client.search_runs(&thread.thread_id, 3).await {
+            Ok(runs) => {
+                for run in &runs {
                     print_run_summary(run);
                 }
             }
@@ -61,7 +55,11 @@ pub async fn show(
 }
 
 fn print_run_summary(run: &serde_json::Value) {
-    let id = run.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+    let id = run
+        .get("run_id")
+        .or_else(|| run.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
     let id_short: String = id.chars().take(8).collect();
     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("-");
     let created = run
@@ -81,7 +79,11 @@ fn print_run_summary(run: &serde_json::Value) {
 }
 
 fn print_run_detail(run: &serde_json::Value) {
-    let id = run.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+    let id = run
+        .get("run_id")
+        .or_else(|| run.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("-");
     let created = run
         .get("created_at")

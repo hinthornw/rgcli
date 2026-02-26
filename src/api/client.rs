@@ -193,6 +193,80 @@ impl Client {
         Ok(resp.json::<Vec<Thread>>().await?)
     }
 
+    /// List recent runs for a thread with endpoint/method fallback across API variants.
+    pub async fn search_runs(&self, thread_id: &str, limit: usize) -> Result<Vec<Value>> {
+        // Preferred: POST /threads/{thread_id}/runs/search
+        let url_post_thread = format!("{}/threads/{}/runs/search", self.endpoint, thread_id);
+        let body = serde_json::json!({ "limit": limit });
+        let resp = self
+            .http
+            .post(&url_post_thread)
+            .headers(self.headers.clone())
+            .json(&body)
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            return Self::decode_runs_response(resp).await;
+        }
+        let post_thread_status = resp.status();
+        let post_thread_body = resp.text().await.unwrap_or_default();
+
+        // Fallback: GET /threads/{thread_id}/runs?limit=...
+        let url_get_thread = format!(
+            "{}/threads/{}/runs?limit={}",
+            self.endpoint, thread_id, limit
+        );
+        let resp = self
+            .http
+            .get(&url_get_thread)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            return Self::decode_runs_response(resp).await;
+        }
+        let get_thread_status = resp.status();
+        let get_thread_body = resp.text().await.unwrap_or_default();
+
+        // Fallback: POST /runs/search with thread_id filter in body.
+        let url_post_global = format!("{}/runs/search", self.endpoint);
+        let body = serde_json::json!({
+            "thread_id": thread_id,
+            "limit": limit
+        });
+        let resp = self
+            .http
+            .post(&url_post_global)
+            .headers(self.headers.clone())
+            .json(&body)
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            return Self::decode_runs_response(resp).await;
+        }
+        let post_global_status = resp.status();
+        let post_global_body = resp.text().await.unwrap_or_default();
+
+        anyhow::bail!(
+            "search runs failed: POST {url_post_thread}: {post_thread_status} - {post_thread_body}; \
+GET {url_get_thread}: {get_thread_status} - {get_thread_body}; \
+POST {url_post_global}: {post_global_status} - {post_global_body}"
+        )
+    }
+
+    async fn decode_runs_response(resp: reqwest::Response) -> Result<Vec<Value>> {
+        let value: Value = resp.json().await?;
+        if let Some(arr) = value.as_array() {
+            return Ok(arr.clone());
+        }
+        for key in ["runs", "items", "data", "resources"] {
+            if let Some(arr) = value.get(key).and_then(|v| v.as_array()) {
+                return Ok(arr.clone());
+            }
+        }
+        Ok(Vec::new())
+    }
+
     pub async fn get_thread(&self, thread_id: &str, select_fields: &[&str]) -> Result<Thread> {
         let mut url = format!("{}/threads/{}", self.endpoint, thread_id);
         if !select_fields.is_empty() {
@@ -215,10 +289,7 @@ impl Client {
     ) -> Result<Vec<serde_json::Value>> {
         let url = format!("{}/assistants/{}/versions", self.endpoint, assistant_id);
         let resp = self.post_json(&url, &serde_json::json!({})).await?;
-        Ok(resp
-            .as_array()
-            .cloned()
-            .unwrap_or_default())
+        Ok(resp.as_array().cloned().unwrap_or_default())
     }
 
     pub async fn get_assistant_graph(&self, assistant_id: &str) -> Result<serde_json::Value> {

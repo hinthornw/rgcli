@@ -41,6 +41,19 @@ pub fn log(component: &str, message: &str) {
         })
         .unwrap_or_default();
 
+    // Cap at 512 KB — truncate to last half when exceeded
+    const MAX_SIZE: u64 = 512 * 1024;
+    if let Ok(meta) = fs::metadata(&path) {
+        if meta.len() > MAX_SIZE {
+            if let Ok(content) = fs::read_to_string(&path) {
+                let half = content.len() / 2;
+                // Find next newline after the halfway point to avoid partial lines
+                let start = content[half..].find('\n').map(|i| half + i + 1).unwrap_or(half);
+                let _ = fs::write(&path, &content[start..]);
+            }
+        }
+    }
+
     let line = format!("[{timestamp}] [{component}] {message}\n");
     let _ = OpenOptions::new()
         .create(true)

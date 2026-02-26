@@ -65,6 +65,7 @@ pub enum ChatExit {
     NewThread,
     Quit,
     Restart,
+    Upgrade,
     RunDoctor,
     RunBench,
 }

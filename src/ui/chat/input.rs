@@ -72,7 +72,11 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "/restart",
-        desc: "Update and restart",
+        desc: "Restart (applies cached update)",
+    },
+    SlashCommand {
+        name: "/upgrade",
+        desc: "Check for updates and upgrade",
     },
     SlashCommand {
         name: "/exit",
@@ -314,6 +318,9 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             }
             if value == "/restart" {
                 return Action::ExitFor(ChatExit::Restart);
+            }
+            if value == "/upgrade" {
+                return Action::ExitFor(ChatExit::Upgrade);
             }
             if value == "/feedback" || value.starts_with("/feedback ") {
                 let body = value.strip_prefix("/feedback").unwrap_or("").trim();

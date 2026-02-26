@@ -39,6 +39,7 @@ pub enum ParrotState {
     Store,
     Crons,
     Logs,
+    Deployments,
 }
 
 pub struct Parrot {
@@ -88,6 +89,7 @@ impl Parrot {
             ParrotState::Store => self.render_thinking(),
             ParrotState::Crons => kawaii_parrot(Eyes::Normal),
             ParrotState::Logs => kawaii_parrot(Eyes::Normal),
+            ParrotState::Deployments => kawaii_parrot(Eyes::Normal),
         }
     }
 

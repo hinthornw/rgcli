@@ -34,6 +34,7 @@ pub struct TuiApp {
     store: screens::StoreScreen,
     crons: screens::CronsScreen,
     logs: screens::LogsScreen,
+    deployments: screens::DeploymentsScreen,
 
     // Shared
     client: Client,
@@ -53,6 +54,7 @@ impl TuiApp {
             store: screens::StoreScreen::new(),
             crons: screens::CronsScreen::new(),
             logs: screens::LogsScreen::new(),
+            deployments: screens::DeploymentsScreen::new(),
             client,
             thread_id,
         }
@@ -135,6 +137,7 @@ impl TuiApp {
         self.store.poll();
         self.crons.poll();
         self.logs.poll();
+        self.deployments.poll();
     }
 
     fn handle_event(&mut self, event: Event) -> Option<ChatExit> {
@@ -185,6 +188,7 @@ impl TuiApp {
             Screen::Store => self.store.handle_key(key, &self.client),
             Screen::Crons => self.crons.handle_key(key, &self.client),
             Screen::Logs => self.logs.handle_key(key, &self.client),
+            Screen::Deployments => self.deployments.handle_key(key),
         };
 
         self.handle_action(action)
@@ -233,6 +237,14 @@ impl TuiApp {
                     )));
                 self.chat.auto_scroll = true;
             }
+            ScreenContext::SwitchContext(name) => {
+                self.chat
+                    .messages
+                    .push(super::chat::ChatMessage::System(format!(
+                        "Switching to context: {name} (restart to apply)"
+                    )));
+                self.chat.auto_scroll = true;
+            }
         }
     }
 
@@ -254,6 +266,7 @@ impl TuiApp {
             Screen::Store => ParrotState::Store,
             Screen::Crons => ParrotState::Crons,
             Screen::Logs => ParrotState::Logs,
+            Screen::Deployments => ParrotState::Deployments,
         };
         self.chat.parrot_mut().set_state(parrot_state);
 
@@ -265,6 +278,7 @@ impl TuiApp {
             Screen::Store => self.store.on_enter(&self.client),
             Screen::Crons => self.crons.on_enter(&self.client),
             Screen::Logs => self.logs.on_enter(&self.client),
+            Screen::Deployments => self.deployments.on_enter(),
         }
     }
 
@@ -290,6 +304,7 @@ impl TuiApp {
             Screen::Store => self.store.render(frame, chunks[1]),
             Screen::Crons => self.crons.render(frame, chunks[1]),
             Screen::Logs => self.logs.render(frame, chunks[1]),
+            Screen::Deployments => self.deployments.render(frame, chunks[1]),
         }
 
         if self.command_bar.active {

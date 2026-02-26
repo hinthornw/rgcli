@@ -9,6 +9,7 @@ pub enum Screen {
     Store,
     Crons,
     Logs,
+    Deployments,
 }
 
 impl Screen {
@@ -21,6 +22,7 @@ impl Screen {
             Screen::Store => "Store",
             Screen::Crons => "Crons",
             Screen::Logs => "Logs",
+            Screen::Deployments => "Deployments",
         }
     }
 
@@ -33,6 +35,7 @@ impl Screen {
             Screen::Store,
             Screen::Crons,
             Screen::Logs,
+            Screen::Deployments,
         ]
     }
 
@@ -51,6 +54,7 @@ impl Screen {
 pub enum ScreenContext {
     Thread(String),
     Assistant(String),
+    SwitchContext(String),
 }
 
 pub enum ScreenAction {

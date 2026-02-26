@@ -24,6 +24,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify Cargo.toml version matches tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+          if [ "$tag" != "$cargo" ]; then
+            echo "::error::Tag version ($tag) does not match Cargo.toml version ($cargo)"
+            exit 1
+          fi
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
         with:

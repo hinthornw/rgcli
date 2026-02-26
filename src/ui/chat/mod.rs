@@ -143,6 +143,7 @@ pub struct ChatState {
     // Trace info
     pub(crate) tenant_id: Option<String>,
     pub(crate) project_id: Option<String>,
+    pub(crate) tracer_session_id: Option<String>,
 
     // Dev toolbar
     pub(crate) devtools: bool,
@@ -196,6 +197,7 @@ impl ChatState {
             interrupted: false,
             tenant_id: None,
             project_id: None,
+            tracer_session_id: None,
             devtools: false,
             metrics: RunMetrics::default(),
             stream_mode: "messages-tuple".to_string(),
@@ -401,7 +403,7 @@ impl ChatState {
         let status_height = if self.search_mode { 2 } else { 1 };
 
         if self.devtools {
-            let devtools_height = 3;
+            let devtools_height = 4;
             let chunks = Layout::vertical([
                 Constraint::Min(3),
                 Constraint::Length(input_height),
@@ -565,10 +567,34 @@ pub async fn run_chat_loop(
             ) {
                 app.tenant_id = Some(tid.to_string());
                 app.project_id = Some(pid.to_string());
+                crate::debug_log::log("chat", &format!("tenant={tid} project={pid}"));
 
                 if let Ok(project) = client.get_project_details(pid, tid).await {
                     if let Some(name) = project.get("name").and_then(|v| v.as_str()) {
                         parts.push(name.to_string());
+                        crate::debug_log::log("chat", &format!("deployment name: {name}"));
+                        // Look up the LangSmith tracer session ID by project name
+                        match client.get_tracer_session_id(name, tid).await {
+                            Ok(Some(session_id)) => {
+                                crate::debug_log::log(
+                                    "chat",
+                                    &format!("tracer session: {session_id}"),
+                                );
+                                app.tracer_session_id = Some(session_id);
+                            }
+                            Ok(None) => {
+                                crate::debug_log::log(
+                                    "chat",
+                                    "tracer session not found for deployment name",
+                                );
+                            }
+                            Err(e) => {
+                                crate::debug_log::log(
+                                    "chat",
+                                    &format!("tracer session lookup failed: {e}"),
+                                );
+                            }
+                        }
                     }
                     if let Some(status) = project.get("status").and_then(|v| v.as_str()) {
                         parts.push(status.to_string());

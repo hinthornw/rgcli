@@ -64,6 +64,7 @@ pub(super) async fn handle_stream_event(
 ) {
     match event {
         StreamEvent::RunStarted(id) => {
+            crate::debug_log::log("stream", &format!("run started: {id}"));
             app.active_run_id = Some(id.clone());
             app.metrics.run_id = Some(id);
         }
@@ -116,6 +117,7 @@ pub(super) async fn handle_stream_event(
         }
         StreamEvent::Done(result) => {
             if let Err(ref err) = result {
+                crate::debug_log::log("stream", &format!("run error: {err}"));
                 app.messages
                     .push(ChatMessage::Error(format!("Error: {}", err)));
             } else if !app.streaming_text.is_empty() {
@@ -153,8 +155,8 @@ pub(super) async fn handle_stream_event(
             // Trace link (devtools only)
             if app.devtools {
                 if let (Some(run_id), Some(tid)) = (&app.metrics.run_id, &app.tenant_id) {
-                    let url = if let Some(pid) = &app.project_id {
-                        format!("https://smith.langchain.com/o/{tid}/projects/p/{pid}/r/{run_id}")
+                    let url = if let Some(sid) = &app.tracer_session_id {
+                        format!("https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{run_id}?trace_id={run_id}")
                     } else {
                         format!("https://smith.langchain.com/o/{tid}/r/{run_id}")
                     };

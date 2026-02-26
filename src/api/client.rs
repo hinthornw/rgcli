@@ -367,6 +367,36 @@ impl Client {
         Ok(resp.json().await?)
     }
 
+    /// Look up a LangSmith tracer session (project) by name.
+    /// Returns the session UUID if found.
+    pub async fn get_tracer_session_id(
+        &self,
+        name: &str,
+        tenant_id: &str,
+    ) -> Result<Option<String>> {
+        let url = format!(
+            "https://api.smith.langchain.com/api/v1/sessions?name={}",
+            urlencoding::encode(name)
+        );
+        let resp = self
+            .http
+            .get(url)
+            .headers(self.headers.clone())
+            .header("X-Tenant-Id", tenant_id)
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "get tracer session").await?;
+        let body: serde_json::Value = resp.json().await?;
+        // Response is an array of sessions
+        let id = body
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|s| s.get("id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        Ok(id)
+    }
+
     /// Get project details from LangSmith API (for hosted deployments).
     pub async fn get_project_details(
         &self,

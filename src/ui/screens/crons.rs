@@ -56,7 +56,7 @@ impl CronsScreen {
         self.async_rx = Some(rx);
         let client = client.clone();
         tokio::spawn(async move {
-            let url = format!("{}/crons/search", client.endpoint());
+            let url = format!("{}/runs/crons/search", client.endpoint());
             match client.post_json(&url, &serde_json::json!({})).await {
                 Ok(resp) => {
                     let crons = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);

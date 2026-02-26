@@ -3,6 +3,7 @@ mod bench;
 mod commands;
 mod config;
 mod context;
+mod debug_log;
 mod deploy;
 mod langsmith;
 mod ui;
@@ -540,6 +541,8 @@ fn version_string() -> String {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     config::ensure_settings_file();
+    debug_log::reset();
+    debug_log::log("main", &format!("ailsd {} starting", version_string()));
 
     if cli.version {
         println!("ailsd {}", version_string());

@@ -355,8 +355,8 @@ pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area:
         .or(app.metrics.last_run_id.as_deref())
     {
         if let Some(tid) = &app.tenant_id {
-            let url = if let Some(pid) = &app.project_id {
-                format!("https://smith.langchain.com/o/{tid}/projects/p/{pid}/r/{rid}")
+            let url = if let Some(sid) = &app.tracer_session_id {
+                format!("https://smith.langchain.com/o/{tid}/projects/p/{sid}/r/{rid}?trace_id={rid}")
             } else {
                 format!("https://smith.langchain.com/o/{tid}/r/{rid}")
             };
@@ -367,10 +367,21 @@ pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area:
         }
     }
 
+    // Line 4: Console (last debug log line)
+    let log_lines = crate::debug_log::tail(1);
+    let mut line4: Vec<Span> = vec![Span::styled(" console ", dim)];
+    if let Some(last) = log_lines.last() {
+        line4.push(Span::styled(
+            last.to_string(),
+            Style::new().fg(Color::DarkGray).bg(Color::Rgb(40, 40, 40)),
+        ));
+    }
+
     let text = ratatui::text::Text::from(vec![
         Line::from(line1),
         Line::from(line2),
         Line::from(line3),
+        Line::from(line4),
     ]);
     let bar = Paragraph::new(text).style(bg);
     frame.render_widget(bar, area);

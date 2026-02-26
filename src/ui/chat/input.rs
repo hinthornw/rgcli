@@ -59,6 +59,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Toggle developer toolbar (F12)",
     },
     SlashCommand {
+        name: "/console",
+        desc: "Show debug log",
+    },
+    SlashCommand {
         name: "/help",
         desc: "Show available commands",
     },
@@ -228,6 +232,21 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             }
             if value == "/devtools" {
                 app.devtools = !app.devtools;
+                super::helpers::reset_textarea(app);
+                return Action::None;
+            }
+            if value == "/console" {
+                let lines = crate::debug_log::tail(50);
+                if lines.is_empty() {
+                    app.messages.push(ChatMessage::System("No debug log entries.".to_string()));
+                } else {
+                    app.messages.push(ChatMessage::System("─── Debug Console ───".to_string()));
+                    for line in lines {
+                        app.messages.push(ChatMessage::System(line));
+                    }
+                    app.messages.push(ChatMessage::System("─────────────────────".to_string()));
+                }
+                app.auto_scroll = true;
                 super::helpers::reset_textarea(app);
                 return Action::None;
             }

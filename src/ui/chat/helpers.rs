@@ -164,6 +164,7 @@ pub(super) fn show_help(app: &mut ChatState) {
         ("/export", "Export conversation to markdown"),
         ("/clear", "Clear chat display"),
         ("/devtools", "Toggle developer toolbar (F12)"),
+        ("/console", "Show debug log"),
         ("/help", "Show available commands"),
         ("/exit", "Exit the chat"),
     ];

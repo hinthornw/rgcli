@@ -85,7 +85,8 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
 
     // Wake from sleep — consume the first keypress
     if *app.parrot.current_state() == super::super::mascot::ParrotState::Sleeping {
-        app.parrot.set_state(super::super::mascot::ParrotState::Idle);
+        app.parrot
+            .set_state(super::super::mascot::ParrotState::Idle);
         return Action::None;
     }
 
@@ -399,6 +400,12 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
         {
             submit_feedback(app, false);
         }
+        KeyCode::Char('y')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || collect_input(&app.textarea).is_empty() =>
+        {
+            yank_last_response(app);
+        }
         KeyCode::F(12) => {
             app.devtools = !app.devtools;
         }
@@ -567,6 +574,48 @@ fn update_completions(app: &mut ChatState) {
         .collect();
     app.show_complete = !matches.is_empty();
     app.completions = matches;
+}
+
+fn yank_last_response(app: &mut ChatState) {
+    let last = app
+        .messages
+        .iter()
+        .rev()
+        .find_map(|m| match m {
+            ChatMessage::Assistant(text) => Some(text.clone()),
+            _ => None,
+        });
+    if let Some(text) = last {
+        // Try pbcopy (macOS), then xclip, then xsel
+        let result = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .or_else(|_| {
+                std::process::Command::new("xclip")
+                    .args(["-selection", "clipboard"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+            })
+            .or_else(|_| {
+                std::process::Command::new("xsel")
+                    .arg("--clipboard")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+            });
+        if let Ok(mut child) = result {
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            app.messages
+                .push(ChatMessage::System("Copied to clipboard.".to_string()));
+            app.auto_scroll = true;
+        } else {
+            app.messages
+                .push(ChatMessage::Error("No clipboard tool found.".to_string()));
+        }
+    }
 }
 
 fn submit_feedback(app: &mut ChatState, thumbs_up: bool) {

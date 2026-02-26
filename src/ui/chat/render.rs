@@ -472,7 +472,12 @@ pub(super) fn render_status(frame: &mut ratatui::Frame, app: &mut ChatState, are
 
 fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     let face = app.parrot.mini_face();
-    let mut left_parts: Vec<Span> = vec![Span::raw(" "), face, Span::raw(" "), Span::raw(&app.context_name)];
+    let mut left_parts: Vec<Span> = vec![
+        Span::raw(" "),
+        face,
+        Span::raw(" "),
+        Span::raw(&app.context_name),
+    ];
 
     left_parts.push(Span::styled(
         format!(" | {}", app.assistant_id),
@@ -518,6 +523,23 @@ fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect
                 Style::new().fg(Color::Blue),
             ));
         }
+    }
+
+    let msg_count = app
+        .messages
+        .iter()
+        .filter(|m| {
+            matches!(
+                m,
+                ChatMessage::User(_) | ChatMessage::Assistant(_)
+            )
+        })
+        .count();
+    if msg_count > 0 {
+        left_parts.push(Span::styled(
+            format!(" | {msg_count} msgs"),
+            Style::new().fg(Color::DarkGray),
+        ));
     }
 
     let right = if let Some(notice) = &app.update_notice {

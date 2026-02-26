@@ -200,3 +200,18 @@ pub(super) fn show_help(app: &mut ChatState) {
     ));
     app.auto_scroll = true;
 }
+
+/// Check if we've already shown the feedback prompt (persisted in cache).
+pub(super) fn has_seen_feedback_prompt() -> bool {
+    let Ok(cache) = crate::config::cache_dir() else {
+        return false;
+    };
+    cache.join("feedback-prompted").exists()
+}
+
+/// Mark the feedback prompt as shown.
+pub(super) fn mark_feedback_prompt_seen() {
+    if let Ok(cache) = crate::config::cache_dir() {
+        let _ = std::fs::write(cache.join("feedback-prompted"), "1");
+    }
+}

@@ -180,6 +180,10 @@ pub struct ChatState {
 
     // Thread history loading
     pub(crate) history_rx: Option<mpsc::UnboundedReceiver<crate::api::types::ThreadState>>,
+
+    // One-time feedback prompt
+    pub(crate) feedback_prompt_shown: bool,
+    pub(crate) session_start: Instant,
 }
 
 impl ChatState {
@@ -230,6 +234,8 @@ impl ChatState {
             parrot: Parrot::new(),
             last_interaction: Instant::now(),
             history_rx: None,
+            feedback_prompt_shown: false,
+            session_start: Instant::now(),
         }
     }
 
@@ -425,6 +431,22 @@ impl ChatState {
             }
         }
         self.parrot.tick();
+
+        // One-time feedback prompt after 60s for new users
+        if !self.feedback_prompt_shown
+            && self.session_start.elapsed() > Duration::from_secs(60)
+            && !self.is_streaming()
+            && !self.is_waiting
+        {
+            self.feedback_prompt_shown = true;
+            if !helpers::has_seen_feedback_prompt() {
+                helpers::mark_feedback_prompt_seen();
+                self.messages.push(ChatMessage::System(
+                    "Enjoying ailsd? We'd love your feedback! Use /feedback to share thoughts, report bugs, or request features.".to_string(),
+                ));
+                self.auto_scroll = true;
+            }
+        }
     }
 
     pub async fn handle_stream_event(&mut self, client: &Client, thread_id: &str) {

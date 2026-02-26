@@ -101,28 +101,33 @@ impl RunsScreen {
                             let url =
                                 format!("{}/threads/{}/runs/search", client.endpoint(), thread.thread_id);
                             let body = serde_json::json!({ "limit": 5 });
-                            if let Ok(resp) = client.post_json(&url, &body).await {
-                                let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
-                                for r in runs {
-                                    let id =
-                                        r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
-                                    let id_short: String = id.chars().take(12).collect();
-                                    let status = r
-                                        .get("status")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("-")
-                                        .to_string();
-                                    let created = r
-                                        .get("created_at")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("-")
-                                        .to_string();
-                                    all_rows.push(vec![
-                                        id_short,
-                                        status,
-                                        tid_short.clone(),
-                                        created,
-                                    ]);
+                            match client.post_json(&url, &body).await {
+                                Ok(resp) => {
+                                    let runs = resp.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+                                    for r in runs {
+                                        let id =
+                                            r.get("run_id").and_then(|v| v.as_str()).unwrap_or("-");
+                                        let id_short: String = id.chars().take(12).collect();
+                                        let status = r
+                                            .get("status")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("-")
+                                            .to_string();
+                                        let created = r
+                                            .get("created_at")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("-")
+                                            .to_string();
+                                        all_rows.push(vec![
+                                            id_short,
+                                            status,
+                                            tid_short.clone(),
+                                            created,
+                                        ]);
+                                    }
+                                }
+                                Err(e) => {
+                                    crate::debug_log::log("runs", &format!("thread {}: {e}", thread.thread_id));
                                 }
                             }
                         }

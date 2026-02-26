@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 const LOCAL_CONFIG_FILE: &str = ".ailsd.yaml";
 const ENV_API_KEY: &str = "LANGSMITH_API_KEY";
+const GITHUB_REPO: &str = "hinthornw/ailsd";
+const SCHEMA_BRANCH: &str = "main";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -65,6 +67,61 @@ impl Default for ContextConfig {
             ]),
         }
     }
+}
+
+/// Global settings (not per-context). Stored at ~/.ailsd/settings.yaml
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    /// Auto-upgrade on exit when a new version is cached (default: true)
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { auto_update: true }
+    }
+}
+
+pub fn load_settings() -> Settings {
+    let Ok(dir) = config_dir() else {
+        return Settings::default();
+    };
+    let path = dir.join("settings.yaml");
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|data| serde_yaml::from_str(&data).ok())
+        .unwrap_or_default()
+}
+
+/// Ensure settings.yaml exists with schema reference. Called on startup.
+pub fn ensure_settings_file() {
+    let Ok(dir) = config_dir() else {
+        return;
+    };
+    let path = dir.join("settings.yaml");
+    if !path.exists() {
+        let _ = save_settings(&Settings::default());
+    }
+}
+
+pub fn save_settings(settings: &Settings) -> Result<()> {
+    let dir = config_dir()?;
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("settings.yaml");
+    let schema_url = format!(
+        "https://raw.githubusercontent.com/{GITHUB_REPO}/{SCHEMA_BRANCH}/schemas/settings.json"
+    );
+    let data = format!(
+        "# yaml-language-server: $schema={schema_url}\n{}",
+        serde_yaml::to_string(settings)?
+    );
+    fs::write(&path, data)?;
+    Ok(())
 }
 
 pub fn config_dir() -> Result<PathBuf> {
@@ -184,7 +241,13 @@ pub fn save_context_config(ctx_cfg: &ContextConfig) -> Result<()> {
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
     }
     let path = dir.join("config.yaml");
-    let data = serde_yaml::to_string(ctx_cfg)?;
+    let schema_url = format!(
+        "https://raw.githubusercontent.com/{GITHUB_REPO}/{SCHEMA_BRANCH}/schemas/config.json"
+    );
+    let data = format!(
+        "# yaml-language-server: $schema={schema_url}\n{}",
+        serde_yaml::to_string(ctx_cfg)?
+    );
     fs::write(&path, data)?;
     #[cfg(unix)]
     {

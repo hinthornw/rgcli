@@ -216,6 +216,64 @@ pub fn pending_update_notice() -> Option<String> {
     }
 }
 
+/// Silently apply a cached update if available. Called on CLI exit.
+/// Returns the version string if upgraded, None otherwise.
+/// Respects the `auto_update` setting.
+pub fn auto_upgrade_if_available() -> Option<String> {
+    let settings = config::load_settings();
+    if !settings.auto_update {
+        return None;
+    }
+    let state = read_state();
+    let latest = state.latest_version.as_ref()?;
+    let current = current_version();
+    if !is_newer(latest, &current) {
+        return None;
+    }
+
+    let cached = state
+        .cached_binary
+        .as_ref()
+        .filter(|p| PathBuf::from(p).exists() && p.contains(latest))?;
+
+    let binary_path = PathBuf::from(cached);
+    let current_exe = std::env::current_exe().ok()?;
+    let current_exe = current_exe.canonicalize().unwrap_or(current_exe);
+
+    // Try direct copy+swap (won't attempt sudo — silent upgrade only)
+    let backup = current_exe.with_extension("bak");
+    let tmp_new = current_exe.with_extension("new");
+
+    if fs::copy(&binary_path, &tmp_new).is_err() {
+        return None;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp_new, fs::Permissions::from_mode(0o755));
+    }
+
+    let _ = fs::rename(&current_exe, &backup);
+    if fs::rename(&tmp_new, &current_exe).is_err() {
+        let _ = fs::rename(&backup, &current_exe);
+        let _ = fs::remove_file(&tmp_new);
+        return None;
+    }
+    let _ = fs::remove_file(&backup);
+    let _ = fs::remove_file(&binary_path);
+
+    let new_state = UpdateState {
+        last_check: Some(Utc::now()),
+        latest_version: Some(latest.clone()),
+        cached_binary: None,
+        current_version: Some(latest.clone()),
+    };
+    let _ = write_state(&new_state);
+
+    Some(latest.clone())
+}
+
 /// Explicit upgrade command.
 pub async fn run_upgrade() -> Result<()> {
     let current = current_version();

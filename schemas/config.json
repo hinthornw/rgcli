@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ailsd config",
+  "description": "Context-based configuration for ailsd CLI (~/.ailsd/config.yaml)",
+  "type": "object",
+  "properties": {
+    "current_context": {
+      "type": "string",
+      "default": "default",
+      "description": "Name of the active deployment context"
+    },
+    "contexts": {
+      "type": "object",
+      "description": "Map of context names to deployment configurations",
+      "additionalProperties": {
+        "$ref": "#/$defs/context"
+      }
+    }
+  },
+  "required": ["current_context", "contexts"],
+  "$defs": {
+    "context": {
+      "type": "object",
+      "description": "A deployment context configuration",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "LangGraph deployment URL (e.g. http://localhost:2024 or https://your-app.langgraph.app)"
+        },
+        "api_key": {
+          "type": "string",
+          "default": "",
+          "description": "LangSmith API key (can also be set via LANGSMITH_API_KEY env var)"
+        },
+        "assistant_id": {
+          "type": "string",
+          "default": "agent",
+          "description": "Default assistant ID to use for chat"
+        },
+        "custom_headers": {
+          "type": "object",
+          "default": {},
+          "description": "Additional HTTP headers to send with every request",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["endpoint"]
+    }
+  }
+}

@@ -88,6 +88,12 @@ enum Command {
     Upgrade,
     /// Remove ailsd from your system
     Uninstall,
+    /// View or modify global settings
+    Settings {
+        /// Setting to change (e.g. auto_update=false)
+        #[arg(value_name = "KEY=VALUE")]
+        set: Option<String>,
+    },
     /// Diagnose deployment connectivity and configuration
     Doctor,
     /// Manage deployment contexts (like kubectl config)
@@ -533,6 +539,7 @@ fn version_string() -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    config::ensure_settings_file();
 
     if cli.version {
         println!("ailsd {}", version_string());
@@ -544,6 +551,39 @@ async fn main() -> Result<()> {
             if let Err(err) = update::run_upgrade().await {
                 eprintln!("{}", print_error(&err.to_string()));
                 std::process::exit(1);
+            }
+            return Ok(());
+        }
+        Some(Command::Settings { set }) => {
+            if let Some(kv) = set {
+                if let Some((key, value)) = kv.split_once('=') {
+                    let mut settings = config::load_settings();
+                    match key.trim() {
+                        "auto_update" => {
+                            settings.auto_update = value.trim().parse().unwrap_or_else(|_| {
+                                eprintln!("Invalid value for auto_update, expected true/false");
+                                std::process::exit(1);
+                            });
+                        }
+                        other => {
+                            eprintln!("Unknown setting: {other}");
+                            eprintln!("Available: auto_update");
+                            std::process::exit(1);
+                        }
+                    }
+                    if let Err(e) = config::save_settings(&settings) {
+                        eprintln!("{}", print_error(&e.to_string()));
+                        std::process::exit(1);
+                    }
+                    println!("Updated: {key} = {value}");
+                } else {
+                    eprintln!("Expected KEY=VALUE format (e.g. auto_update=false)");
+                    std::process::exit(1);
+                }
+            } else {
+                let settings = config::load_settings();
+                println!("auto_update = {}", settings.auto_update);
+                println!("\nSettings file: {}", config::config_dir().map(|d| d.join("settings.yaml").to_string_lossy().to_string()).unwrap_or_else(|_| "?".to_string()));
             }
             return Ok(());
         }
@@ -1066,6 +1106,9 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
             }
             ui::ChatExit::Quit => {
                 println!("To resume this thread:\n  ailsd --thread-id {}", thread_id);
+                if let Some(version) = update::auto_upgrade_if_available() {
+                    println!("Auto-updated to {version}.");
+                }
                 return Ok(());
             }
         }

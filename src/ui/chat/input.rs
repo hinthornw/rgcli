@@ -79,6 +79,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Check for updates and upgrade",
     },
     SlashCommand {
+        name: "/do-a-trick",
+        desc: "Make the parrot do a trick",
+    },
+    SlashCommand {
         name: "/exit",
         desc: "Exit the chat",
     },
@@ -325,6 +329,25 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             if value == "/feedback" || value.starts_with("/feedback ") {
                 let body = value.strip_prefix("/feedback").unwrap_or("").trim();
                 open_feedback(app, body);
+                super::helpers::reset_textarea(app);
+                return Action::None;
+            }
+            if value == "/do-a-trick" {
+                let tricks = [
+                    "The parrot does a backflip!",
+                    "The parrot moonwalks across the screen!",
+                    "The parrot juggles invisible seeds!",
+                    "The parrot does a little pirouette!",
+                    "The parrot takes a bow!",
+                    "The parrot breakdances!",
+                ];
+                let idx = (app.parrot.pos_x as usize + app.messages.len()) % tricks.len();
+                app.messages
+                    .push(ChatMessage::System(tricks[idx].to_string()));
+                app.parrot.set_timed_state(
+                    crate::ui::mascot::ParrotState::Trick,
+                    std::time::Duration::from_secs(4),
+                );
                 super::helpers::reset_textarea(app);
                 return Action::None;
             }
@@ -637,14 +660,10 @@ fn open_feedback(app: &mut ChatState, body: &str) {
 }
 
 fn yank_last_response(app: &mut ChatState) {
-    let last = app
-        .messages
-        .iter()
-        .rev()
-        .find_map(|m| match m {
-            ChatMessage::Assistant(text) => Some(text.clone()),
-            _ => None,
-        });
+    let last = app.messages.iter().rev().find_map(|m| match m {
+        ChatMessage::Assistant(text) => Some(text.clone()),
+        _ => None,
+    });
     if let Some(text) = last {
         // Try pbcopy (macOS), then xclip, then xsel
         let result = std::process::Command::new("pbcopy")

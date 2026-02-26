@@ -47,6 +47,7 @@ pub enum ParrotState {
     Store,
     Crons,
     Deployments,
+    Trick,
 }
 
 pub struct Parrot {
@@ -55,10 +56,10 @@ pub struct Parrot {
     tick: usize,
     rng: u32,
     state_expires: Option<Instant>,
-    berserk: bool, // 1/10 chance on error — parrot freaks out
-    pub pos_x: u16,       // horizontal position within box
-    pace_dir: i8,          // 1 = moving right, -1 = moving left
-    pub box_width: u16,    // set by renderer so parrot knows bounds
+    berserk: bool,      // 1/10 chance on error — parrot freaks out
+    pub pos_x: u16,     // horizontal position within box
+    pace_dir: i8,       // 1 = moving right, -1 = moving left
+    pub box_width: u16, // set by renderer so parrot knows bounds
 }
 
 impl Parrot {
@@ -145,8 +146,15 @@ impl Parrot {
             ParrotState::Idle => 12, // calm, slow transitions
             ParrotState::Runs => 5,
             ParrotState::Sleeping => 12, // slow Z animation
-            ParrotState::FeedbackHappy | ParrotState::FeedbackSad => 3, // fast celebration
-            ParrotState::Error => if self.berserk { 1 } else { 3 },
+            ParrotState::FeedbackHappy | ParrotState::FeedbackSad => 3,
+            ParrotState::Trick => 2, // fast trick animation
+            ParrotState::Error => {
+                if self.berserk {
+                    1
+                } else {
+                    3
+                }
+            }
             _ => 10,
         };
         if self.tick % base_speed == 0 {
@@ -224,6 +232,7 @@ impl Parrot {
             ParrotState::Store => self.render_thinking(),
             ParrotState::Crons => kawaii_parrot(Pose::default()),
             ParrotState::Deployments => kawaii_parrot(Pose::default()),
+            ParrotState::Trick => self.render_trick(),
         }
     }
 
@@ -270,7 +279,11 @@ impl Parrot {
                     let faces = ["(╯°□°)╯︵┻━┻", "(ノಠ益ಠ)ノ彡┻━┻", "ヽ(°□°)ﾉ", "(>_<)!!!"];
                     Span::styled(faces[self.frame % faces.len()].to_string(), error_style)
                 } else {
-                    let s = if self.frame % 2 == 0 { "(°□°)!" } else { "(°□°) " };
+                    let s = if self.frame % 2 == 0 {
+                        "(°□°)!"
+                    } else {
+                        "(°□°) "
+                    };
                     Span::styled(s.to_string(), error_style)
                 }
             }
@@ -283,6 +296,10 @@ impl Parrot {
                 Span::styled(zs.to_string(), sleep_style)
             }
             ParrotState::Interrupted => Span::styled("(◕_◕)⏸", face_style),
+            ParrotState::Trick => {
+                let faces = ["(✧▽✧)~♪", "(◕‿◕)♫", "ヽ(✧◡✧)ノ", "(✦‿✦)✧"];
+                Span::styled(faces[self.frame % faces.len()].to_string(), sparkle_style)
+            }
             _ => Span::styled("(◕‿◕)", face_style),
         }
     }
@@ -438,11 +455,97 @@ impl Parrot {
                 1 => 1,
                 _ => 0,
             },
-            wing_left: if r % 2 == 0 { WingPos::Up } else { WingPos::Down },
-            wing_right: if r2 % 2 == 0 { WingPos::Up } else { WingPos::Down },
+            wing_left: if r % 2 == 0 {
+                WingPos::Up
+            } else {
+                WingPos::Down
+            },
+            wing_right: if r2 % 2 == 0 {
+                WingPos::Up
+            } else {
+                WingPos::Down
+            },
             foot_left: r % 3 != 0,
             foot_right: r2 % 3 != 0,
         })
+    }
+
+    fn render_trick(&mut self) -> Vec<Line<'static>> {
+        // 12-frame trick cycle: wind up → jump → spin → land → bow
+        let pose = match self.frame % 12 {
+            // Wind up: crouch with look left
+            0 | 1 => Pose {
+                eyes: Eyes::Sparkle,
+                tilt: -1,
+                ..Pose::default()
+            },
+            // Jump! bounce with wings up
+            2 | 3 => Pose {
+                eyes: Eyes::Sparkle,
+                bounce: true,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Up,
+                ..Pose::default()
+            },
+            // Spin: tilt right, look right
+            4 => Pose {
+                eyes: Eyes::LookRight,
+                bounce: true,
+                tilt: 1,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Down,
+                ..Pose::default()
+            },
+            // Spin: tilt left, look left
+            5 => Pose {
+                eyes: Eyes::LookLeft,
+                bounce: true,
+                tilt: -1,
+                wing_left: WingPos::Down,
+                wing_right: WingPos::Up,
+                ..Pose::default()
+            },
+            // Flip! both wings up, sparkle eyes, bouncing
+            6 | 7 => Pose {
+                eyes: Eyes::Happy,
+                bounce: true,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Up,
+                foot_left: false,
+                foot_right: false,
+                ..Pose::default()
+            },
+            // Landing: one foot tap
+            8 => Pose {
+                eyes: Eyes::Sparkle,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Up,
+                foot_left: true,
+                foot_right: false,
+                ..Pose::default()
+            },
+            // Landed: settle
+            9 => Pose {
+                eyes: Eyes::Sparkle,
+                wing_left: WingPos::Down,
+                wing_right: WingPos::Down,
+                ..Pose::default()
+            },
+            // Bow: tilt forward
+            10 => Pose {
+                eyes: Eyes::Happy,
+                tilt: 1,
+                ..Pose::default()
+            },
+            // Ta-da!
+            _ => Pose {
+                eyes: Eyes::Sparkle,
+                wing_left: WingPos::Up,
+                wing_right: WingPos::Up,
+                ..Pose::default()
+            },
+        };
+        kawaii_parrot(pose)
     }
 
     fn render_runs(&self) -> Vec<Line<'static>> {

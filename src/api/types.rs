@@ -50,6 +50,8 @@ pub struct Thread {
     #[serde(default)]
     pub updated_at: Option<String>,
     #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
     pub metadata: Option<Value>,
     #[serde(default)]
     pub values: Option<Value>,

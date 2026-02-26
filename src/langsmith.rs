@@ -2,7 +2,7 @@ use anyhow::Result;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 
-const DEFAULT_API_BASE: &str = "https://api.smith.langchain.com";
+const DEFAULT_API_BASE: &str = "https://api.host.langchain.com";
 
 #[derive(Debug, Deserialize)]
 pub struct Deployment {

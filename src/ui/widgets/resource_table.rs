@@ -258,10 +258,11 @@ impl ResourceTable {
                             if col_idx < self.columns.len()
                                 && self.columns[col_idx].name.to_lowercase() == "status"
                             {
-                                let color = match text.as_str() {
-                                    "success" => Color::Green,
-                                    "error" => Color::Red,
-                                    "running" | "pending" => Color::Yellow,
+                                let lower = text.to_lowercase();
+                                let color = match lower.as_str() {
+                                    "success" | "idle" | "active" | "ready" => Color::Green,
+                                    "error" | "failed" => Color::Red,
+                                    "running" | "pending" | "busy" | "building" => Color::Yellow,
                                     "interrupted" => Color::Magenta,
                                     _ => Color::Reset,
                                 };

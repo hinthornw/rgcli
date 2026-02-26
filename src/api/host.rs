@@ -3,6 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 
 const DEFAULT_HOST_URL: &str = "https://api.smith.langchain.com";
+const DEFAULT_PROJECTS_URL: &str = "https://api.host.langchain.com";
 
 pub struct HostClient {
     http: reqwest::Client,
@@ -39,23 +40,35 @@ impl HostClient {
         Ok(Self { http, base_url })
     }
 
-    /// List all deployments, return the JSON array.
+    /// List all deployments via /v1/projects. Paginates with limit/offset.
     pub async fn list_deployments(&self) -> Result<Vec<serde_json::Value>> {
-        let url = format!("{}/v2/deployments", self.base_url);
-        let resp = self.http.get(&url).send().await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("GET /v2/deployments failed: {status} - {body}");
+        let mut all = Vec::new();
+        let limit = 100;
+        let mut offset = 0;
+        loop {
+            let projects_base = std::env::var("LANGSMITH_HOST_URL")
+                .unwrap_or_else(|_| DEFAULT_PROJECTS_URL.to_string());
+            let url = format!(
+                "{}/v1/projects?limit={}&offset={}",
+                projects_base.trim_end_matches('/'),
+                limit,
+                offset
+            );
+            let resp = self.http.get(&url).send().await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("GET /v1/projects failed: {status} - {body}");
+            }
+            let batch: Vec<serde_json::Value> = resp.json().await?;
+            let count = batch.len();
+            all.extend(batch);
+            if count < limit {
+                break;
+            }
+            offset += limit;
         }
-        let body: serde_json::Value = resp.json().await?;
-        // Response is { resources: [...] }
-        let resources = body
-            .get("resources")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .unwrap_or_default();
-        Ok(resources)
+        Ok(all)
     }
 
     /// Find a deployment by name. Returns (id, deployment_json) if found.

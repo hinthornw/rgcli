@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -41,15 +42,23 @@ impl ThreadsScreen {
                 vec![
                     Column {
                         name: "ID".to_string(),
-                        width_pct: 25,
+                        width_pct: 15,
+                    },
+                    Column {
+                        name: "Status".to_string(),
+                        width_pct: 10,
                     },
                     Column {
                         name: "Created".to_string(),
-                        width_pct: 35,
+                        width_pct: 18,
                     },
                     Column {
                         name: "Updated".to_string(),
-                        width_pct: 40,
+                        width_pct: 18,
+                    },
+                    Column {
+                        name: "Last Message".to_string(),
+                        width_pct: 39,
                     },
                 ],
             ),
@@ -80,21 +89,19 @@ impl ThreadsScreen {
                         .iter()
                         .map(|t| {
                             let id_short: String = t.thread_id.chars().take(12).collect();
-                            vec![
-                                id_short,
-                                t.created_at.clone().unwrap_or_else(|| "-".to_string()),
-                                t.updated_at.clone().unwrap_or_else(|| "-".to_string()),
-                            ]
+                            let status = t
+                                .status
+                                .as_deref()
+                                .unwrap_or("-")
+                                .to_string();
+                            let created = format_local_time(t.created_at.as_deref());
+                            let updated = format_local_time(t.updated_at.as_deref());
+                            let last_msg = extract_last_message(&t.values);
+                            // Append full ID as hidden column
+                            vec![id_short, status, created, updated, last_msg, t.thread_id.clone()]
                         })
                         .collect();
-                    let ids: Vec<String> = threads.iter().map(|t| t.thread_id.clone()).collect();
-                    let mut full_rows: Vec<Vec<String>> = Vec::new();
-                    for (i, row) in rows.into_iter().enumerate() {
-                        let mut r = row;
-                        r.push(ids[i].clone());
-                        full_rows.push(r);
-                    }
-                    let _ = tx.send(AsyncResult::Rows(full_rows));
+                    let _ = tx.send(AsyncResult::Rows(rows));
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::Error(e.to_string()));
@@ -145,12 +152,12 @@ impl ThreadsScreen {
                     AsyncResult::Rows(rows) => {
                         self.thread_ids = rows
                             .iter()
-                            .map(|r| r.get(3).cloned().unwrap_or_default())
+                            .map(|r| r.get(5).cloned().unwrap_or_default())
                             .collect();
                         let display_rows: Vec<Vec<String>> = rows
                             .into_iter()
                             .map(|mut r| {
-                                r.truncate(3);
+                                r.truncate(5);
                                 r
                             })
                             .collect();
@@ -374,4 +381,75 @@ fn truncate_str(s: &str, max: usize) -> String {
     } else {
         first_line.to_string()
     }
+}
+
+/// Parse an ISO-8601 timestamp and format it in local time.
+fn format_local_time(ts: Option<&str>) -> String {
+    let Some(ts) = ts else {
+        return "-".to_string();
+    };
+    ts.parse::<DateTime<Utc>>()
+        .map(|utc| {
+            let local: DateTime<Local> = utc.into();
+            local.format("%Y-%m-%d %H:%M").to_string()
+        })
+        .unwrap_or_else(|_| ts.to_string())
+}
+
+/// Extract a short preview of the last message from thread values.
+fn extract_last_message(values: &Option<serde_json::Value>) -> String {
+    let Some(vals) = values else {
+        return "-".to_string();
+    };
+    // values.messages is typically an array of message objects
+    let messages = vals
+        .get("messages")
+        .and_then(|m| m.as_array())
+        .or_else(|| {
+            // Some threads have values as an array directly
+            vals.as_array()
+        });
+    let Some(msgs) = messages else {
+        return "-".to_string();
+    };
+    // Find the last message with content
+    for msg in msgs.iter().rev() {
+        if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+            if !content.is_empty() {
+                let role = msg
+                    .get("type")
+                    .or_else(|| msg.get("role"))
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("");
+                let prefix = match role {
+                    "human" | "user" => "User: ",
+                    "ai" | "assistant" => "AI: ",
+                    "tool" => "Tool: ",
+                    _ => "",
+                };
+                return truncate_str(&format!("{prefix}{content}"), 80);
+            }
+        }
+        // Handle content as array (e.g. multimodal messages)
+        if let Some(parts) = msg.get("content").and_then(|c| c.as_array()) {
+            for part in parts {
+                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                    if !text.is_empty() {
+                        let role = msg
+                            .get("type")
+                            .or_else(|| msg.get("role"))
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("");
+                        let prefix = match role {
+                            "human" | "user" => "User: ",
+                            "ai" | "assistant" => "AI: ",
+                            _ => "",
+                        };
+                        return truncate_str(&format!("{prefix}{text}"), 80);
+                    }
+                }
+            }
+        }
+    }
+    "-".to_string()
 }

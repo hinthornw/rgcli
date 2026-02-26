@@ -55,6 +55,10 @@ pub struct Parrot {
     tick: usize,
     rng: u32,
     state_expires: Option<Instant>,
+    berserk: bool, // 1/10 chance on error — parrot freaks out
+    pub pos_x: u16,       // horizontal position within box
+    pace_dir: i8,          // 1 = moving right, -1 = moving left
+    pub box_width: u16,    // set by renderer so parrot knows bounds
 }
 
 impl Parrot {
@@ -65,6 +69,10 @@ impl Parrot {
             tick: 0,
             rng: 0xDEAD_BEEF,
             state_expires: None,
+            berserk: false,
+            pos_x: 0,
+            pace_dir: 1,
+            box_width: 20,
         }
     }
 
@@ -78,6 +86,24 @@ impl Parrot {
     }
 
     pub fn set_timed_state(&mut self, state: ParrotState, duration: Duration) {
+        if state == ParrotState::Error {
+            // 1 in 10 chance to go berserk
+            let mut rng = self.rng;
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            self.rng = rng;
+            self.berserk = rng % 10 == 0;
+            if self.berserk {
+                // Berserk lasts longer so you can enjoy the meltdown
+                self.state_expires = Some(Instant::now() + Duration::from_secs(6));
+                self.state = state;
+                self.frame = 0;
+                self.tick = 0;
+                return;
+            }
+        }
+        self.berserk = false;
         self.state = state;
         self.state_expires = Some(Instant::now() + duration);
         self.frame = 0;
@@ -88,6 +114,7 @@ impl Parrot {
         if let Some(expires) = self.state_expires {
             if Instant::now() >= expires {
                 self.state_expires = None;
+                self.berserk = false;
                 self.state = ParrotState::Idle;
                 self.frame = 0;
                 self.tick = 0;
@@ -119,7 +146,7 @@ impl Parrot {
             ParrotState::Runs => 5,
             ParrotState::Sleeping => 12, // slow Z animation
             ParrotState::FeedbackHappy | ParrotState::FeedbackSad => 3, // fast celebration
-            ParrotState::Error => 3,
+            ParrotState::Error => if self.berserk { 1 } else { 3 },
             _ => 10,
         };
         if self.tick % base_speed == 0 {
@@ -128,6 +155,38 @@ impl Parrot {
                 return; // skip this frame advance
             }
             self.frame += 1;
+        }
+
+        // Pacing: move horizontally every ~8 ticks during idle pacing frames
+        // The idle cycle has frames 6-9 as "pacing" — move during those
+        if self.state == ParrotState::Idle && self.tick % 8 == 0 {
+            let sprite_width: u16 = 11;
+            let max_x = self.box_width.saturating_sub(sprite_width);
+            if max_x > 0 {
+                let idle_frame = self.frame % 16;
+                if (6..=9).contains(&idle_frame) {
+                    // Pacing phase: move in current direction
+                    let new_x = self.pos_x as i16 + self.pace_dir as i16;
+                    if new_x <= 0 {
+                        self.pos_x = 0;
+                        self.pace_dir = 1;
+                    } else if new_x >= max_x as i16 {
+                        self.pos_x = max_x;
+                        self.pace_dir = -1;
+                    } else {
+                        self.pos_x = new_x as u16;
+                    }
+                }
+            }
+        }
+
+        // Berserk: jitter position randomly
+        if self.berserk && self.state == ParrotState::Error {
+            let sprite_width: u16 = 11;
+            let max_x = self.box_width.saturating_sub(sprite_width);
+            if max_x > 0 {
+                self.pos_x = (self.rand() as u16) % (max_x + 1);
+            }
         }
     }
 
@@ -150,11 +209,7 @@ impl Parrot {
                 tilt: if self.frame % 2 == 0 { -1 } else { 0 },
                 ..Pose::default()
             }),
-            ParrotState::Error => kawaii_parrot(Pose {
-                eyes: Eyes::Sparkle, // reuse sparkle as "shocked"
-                bounce: self.frame % 2 == 0,
-                ..Pose::default()
-            }),
+            ParrotState::Error => self.render_error(),
             ParrotState::Sleeping => kawaii_parrot(Pose {
                 eyes: Eyes::Happy, // closed eyes
                 ..Pose::default()
@@ -211,12 +266,13 @@ impl Parrot {
             }
             ParrotState::FeedbackSad => Span::styled("(◕︵◕)", sad_style),
             ParrotState::Error => {
-                let s = if self.frame % 2 == 0 {
-                    "(°□°)!"
+                if self.berserk {
+                    let faces = ["(╯°□°)╯︵┻━┻", "(ノಠ益ಠ)ノ彡┻━┻", "ヽ(°□°)ﾉ", "(>_<)!!!"];
+                    Span::styled(faces[self.frame % faces.len()].to_string(), error_style)
                 } else {
-                    "(°□°) "
-                };
-                Span::styled(s.to_string(), error_style)
+                    let s = if self.frame % 2 == 0 { "(°□°)!" } else { "(°□°) " };
+                    Span::styled(s.to_string(), error_style)
+                }
             }
             ParrotState::Sleeping => {
                 let zs = match self.frame % 3 {
@@ -353,6 +409,40 @@ impl Parrot {
             }
         }
         lines
+    }
+
+    fn render_error(&mut self) -> Vec<Line<'static>> {
+        if !self.berserk {
+            // Normal error: shocked face, gentle bounce
+            return kawaii_parrot(Pose {
+                eyes: Eyes::Sparkle,
+                bounce: self.frame % 2 == 0,
+                ..Pose::default()
+            });
+        }
+
+        // BERSERK MODE: rapid chaotic flailing
+        let r = self.rand();
+        let eyes = match r % 4 {
+            0 => Eyes::Sparkle,
+            1 => Eyes::LookLeft,
+            2 => Eyes::LookRight,
+            _ => Eyes::Happy,
+        };
+        let r2 = self.rand();
+        kawaii_parrot(Pose {
+            eyes,
+            bounce: r2 % 2 == 0,
+            tilt: match r2 % 3 {
+                0 => -1,
+                1 => 1,
+                _ => 0,
+            },
+            wing_left: if r % 2 == 0 { WingPos::Up } else { WingPos::Down },
+            wing_right: if r2 % 2 == 0 { WingPos::Up } else { WingPos::Down },
+            foot_left: r % 3 != 0,
+            foot_right: r2 % 3 != 0,
+        })
     }
 
     fn render_runs(&self) -> Vec<Line<'static>> {

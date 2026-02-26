@@ -15,9 +15,22 @@ pub(super) fn render_header(frame: &mut ratatui::Frame, app: &mut ChatState, are
     ])
     .split(area);
 
-    // Render animated parrot sprite
+    // Tell parrot how wide its box is so it can pace
+    app.parrot.box_width = chunks[0].width;
+
+    // Render animated parrot sprite with horizontal offset
     let parrot_lines = app.parrot.render();
-    let parrot_para = Paragraph::new(parrot_lines);
+    let offset = app.parrot.pos_x as usize;
+    let padded: Vec<Line> = parrot_lines
+        .into_iter()
+        .map(|mut line| {
+            if offset > 0 {
+                line.spans.insert(0, Span::raw(" ".repeat(offset)));
+            }
+            line
+        })
+        .collect();
+    let parrot_para = Paragraph::new(padded);
     frame.render_widget(parrot_para, chunks[0]);
 
     // Render info lines beside the parrot
@@ -506,10 +519,7 @@ pub(super) fn render_status(frame: &mut ratatui::Frame, app: &mut ChatState, are
 }
 
 fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
-    let face = app.parrot.mini_face();
     let mut left_parts: Vec<Span> = vec![
-        Span::raw(" "),
-        face,
         Span::raw(" "),
         Span::raw(&app.context_name),
     ];

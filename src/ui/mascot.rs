@@ -70,7 +70,7 @@ impl Parrot {
             rng: 0xDEAD_BEEF,
             state_expires: None,
             berserk: false,
-            pos_x: 0,
+            pos_x: 6,
             pace_dir: 1,
             box_width: 20,
         }
@@ -157,14 +157,14 @@ impl Parrot {
             self.frame += 1;
         }
 
-        // Pacing: move horizontally every ~8 ticks during idle pacing frames
-        // The idle cycle has frames 6-9 as "pacing" — move during those
-        if self.state == ParrotState::Idle && self.tick % 8 == 0 {
+        // Pacing: move horizontally every ~6 ticks during idle
+        // Pace during most of the cycle (frames 4-13), only rest at the ends
+        if self.state == ParrotState::Idle && self.tick % 6 == 0 {
             let sprite_width: u16 = 11;
             let max_x = self.box_width.saturating_sub(sprite_width);
             if max_x > 0 {
                 let idle_frame = self.frame % 16;
-                if (6..=9).contains(&idle_frame) {
+                if (4..=13).contains(&idle_frame) {
                     // Pacing phase: move in current direction
                     let new_x = self.pos_x as i16 + self.pace_dir as i16;
                     if new_x <= 0 {

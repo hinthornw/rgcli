@@ -1062,14 +1062,58 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                 chat_config.context_info = format!("context: {}", config::current_context_name());
             }
             ui::ChatExit::SwitchContext(name) => {
+                let prev_context = config::current_context_name();
                 context::use_context(&name)?;
                 cfg = config::load().context("failed to load config")?;
                 client = Client::new(&cfg)?;
                 history.clear();
-                let thread = client.create_thread().await?;
-                thread_id = thread.thread_id;
-                chat_config.endpoint = cfg.endpoint.clone();
-                chat_config.context_info = format!("context: {}", name);
+                match client.create_thread().await {
+                    Ok(thread) => {
+                        thread_id = thread.thread_id;
+                        chat_config.endpoint = cfg.endpoint.clone();
+                        chat_config.context_info = format!("context: {}", name);
+                    }
+                    Err(e) => {
+                        eprintln!("\nFailed to connect to context \"{name}\": {e}");
+                        eprintln!("  Endpoint: {}", cfg.endpoint);
+                        eprintln!("  API key:  {}", if cfg.api_key.is_empty() { "(not set)" } else { "(set)" });
+                        if !cfg.custom_headers.is_empty() {
+                            eprintln!("  Custom headers: {}", cfg.custom_headers.keys().cloned().collect::<Vec<_>>().join(", "));
+                        }
+                        eprintln!("\nWould you like to reconfigure this context? [Y/n] ");
+                        let mut answer = String::new();
+                        let _ = std::io::stdin().read_line(&mut answer);
+                        if !answer.trim().eq_ignore_ascii_case("n") {
+                            let new_cfg = run_configure_inner(Some(&cfg)).context("configuration failed")?;
+                            config::save_context(&name, &new_cfg)?;
+                            cfg = new_cfg;
+                            client = Client::new(&cfg)?;
+                            match client.create_thread().await {
+                                Ok(thread) => {
+                                    thread_id = thread.thread_id;
+                                    chat_config.endpoint = cfg.endpoint.clone();
+                                    chat_config.context_info = format!("context: {}", name);
+                                }
+                                Err(e2) => {
+                                    eprintln!("Still unable to connect: {e2}");
+                                    eprintln!("Returning to previous context.");
+                                    context::use_context(&prev_context)?;
+                                    cfg = config::load().context("failed to load config")?;
+                                    client = Client::new(&cfg)?;
+                                    chat_config.endpoint = cfg.endpoint.clone();
+                                    chat_config.context_info = format!("context: {}", prev_context);
+                                }
+                            }
+                        } else {
+                            eprintln!("Returning to previous context.");
+                            context::use_context(&prev_context)?;
+                            cfg = config::load().context("failed to load config")?;
+                            client = Client::new(&cfg)?;
+                            chat_config.endpoint = cfg.endpoint.clone();
+                            chat_config.context_info = format!("context: {}", prev_context);
+                        }
+                    }
+                }
             }
             ui::ChatExit::NewThread => {
                 let thread = client.create_thread().await?;

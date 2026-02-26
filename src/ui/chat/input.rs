@@ -367,6 +367,22 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
                 app.auto_scroll = true;
             }
         }
+        KeyCode::Char('+') | KeyCode::Char('=')
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && app.feedback_submitted.is_none()
+                && app.metrics.last_feedback_url.is_some()
+                && collect_input(&app.textarea).is_empty() =>
+        {
+            submit_feedback(app, true);
+        }
+        KeyCode::Char('-')
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && app.feedback_submitted.is_none()
+                && app.metrics.last_feedback_url.is_some()
+                && collect_input(&app.textarea).is_empty() =>
+        {
+            submit_feedback(app, false);
+        }
         KeyCode::F(12) => {
             app.devtools = !app.devtools;
         }
@@ -535,6 +551,17 @@ fn update_completions(app: &mut ChatState) {
         .collect();
     app.show_complete = !matches.is_empty();
     app.completions = matches;
+}
+
+fn submit_feedback(app: &mut ChatState, thumbs_up: bool) {
+    let score = if thumbs_up { 1 } else { 0 };
+    app.feedback_submitted = Some(thumbs_up);
+    if let Some(url) = app.metrics.last_feedback_url.clone() {
+        let feedback_url = format!("{}?score={}", url, score);
+        tokio::spawn(async move {
+            let _ = reqwest::Client::new().get(&feedback_url).send().await;
+        });
+    }
 }
 
 fn to_textarea_input(key: KeyEvent) -> Option<Input> {

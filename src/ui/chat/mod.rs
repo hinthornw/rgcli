@@ -153,6 +153,9 @@ pub struct ChatState {
     // Stream mode
     pub(crate) stream_mode: String,
 
+    // Feedback
+    pub(crate) feedback_submitted: Option<bool>,
+
     // Scroll mode (tmux-style Ctrl+B [)
     pub(crate) scroll_mode: bool,
     pub(crate) prefix_at: Option<Instant>,
@@ -206,6 +209,7 @@ impl ChatState {
             devtools: false,
             metrics: RunMetrics::default(),
             stream_mode: "messages-tuple".to_string(),
+            feedback_submitted: None,
             scroll_mode: false,
             prefix_at: None,
             search_mode: false,

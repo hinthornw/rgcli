@@ -38,6 +38,8 @@ pub struct RunRequest {
     pub if_not_exists: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multitask_strategy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback_keys: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +101,7 @@ pub fn new_run_request(
         stream_mode: vec![mode.to_string()],
         if_not_exists: Some("create".to_string()),
         multitask_strategy: multitask_strategy.map(String::from),
+        feedback_keys: Some(vec!["user_score".to_string()]),
     }
 }
 
@@ -133,6 +136,7 @@ pub fn new_run_request_with_attachments(
         stream_mode: vec![mode.to_string()],
         if_not_exists: Some("create".to_string()),
         multitask_strategy: multitask_strategy.map(String::from),
+        feedback_keys: Some(vec!["user_score".to_string()]),
     }
 }
 
@@ -149,6 +153,7 @@ pub fn new_resume_request(
         stream_mode: vec![mode.to_string()],
         if_not_exists: None,
         multitask_strategy: None,
+        feedback_keys: Some(vec!["user_score".to_string()]),
     }
 }
 

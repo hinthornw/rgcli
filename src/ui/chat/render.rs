@@ -131,6 +131,37 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame, app: &mut ChatState, area:
         }
     }
 
+    // Feedback controls (after last completed assistant message, when not streaming)
+    if !app.is_streaming() && !app.is_waiting {
+        if let Some(ref _url) = app.metrics.last_feedback_url {
+            match app.feedback_submitted {
+                None => {
+                    lines.push(Line::from(vec![
+                        Span::raw("           "),
+                        Span::styled("[+]", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::styled(" thumbs up  ", Style::new().fg(Color::DarkGray)),
+                        Span::styled("[-]", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled(" thumbs down", Style::new().fg(Color::DarkGray)),
+                    ]));
+                }
+                Some(true) => {
+                    lines.push(Line::from(vec![
+                        Span::raw("           "),
+                        Span::styled("[+] ", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::styled("voted!", Style::new().fg(Color::Green)),
+                    ]));
+                }
+                Some(false) => {
+                    lines.push(Line::from(vec![
+                        Span::raw("           "),
+                        Span::styled("[-] ", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled("voted!", Style::new().fg(Color::Red)),
+                    ]));
+                }
+            }
+        }
+    }
+
     // Streaming content
     if !app.streaming_text.is_empty() {
         lines.push(Line::default());

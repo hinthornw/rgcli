@@ -32,6 +32,8 @@ pub(crate) struct RunMetrics {
     pub(crate) current_node: Option<String>,
     pub(crate) node_history: Vec<String>,
     pub(crate) last_node_history: Vec<String>,
+    pub(crate) feedback_url: Option<String>,
+    pub(crate) last_feedback_url: Option<String>,
 }
 
 pub(super) async fn check_for_updates_loop(tx: mpsc::UnboundedSender<String>) -> Result<()> {
@@ -115,6 +117,11 @@ pub(super) async fn handle_stream_event(
             app.messages.push(ChatMessage::ToolResult(name, content));
             app.auto_scroll = true;
         }
+        StreamEvent::FeedbackUrls(urls) => {
+            if let Some(url) = urls.get("user_score") {
+                app.metrics.feedback_url = Some(url.clone());
+            }
+        }
         StreamEvent::Done(result) => {
             if let Err(ref err) = result {
                 crate::debug_log::log("stream", &format!("run error: {err}"));
@@ -149,6 +156,7 @@ pub(super) async fn handle_stream_event(
                 }
             }
             app.metrics.last_tool_timeline = std::mem::take(&mut app.metrics.tool_timeline);
+            app.metrics.last_feedback_url = app.metrics.feedback_url.take();
             app.metrics.last_node_history = std::mem::take(&mut app.metrics.node_history);
             app.metrics.current_node = None;
 
@@ -215,6 +223,8 @@ fn prepare_run(app: &mut ChatState) -> mpsc::UnboundedSender<StreamEvent> {
     app.metrics.tool_timeline.clear();
     app.metrics.node_history.clear();
     app.metrics.current_node = None;
+    app.metrics.feedback_url = None;
+    app.feedback_submitted = None;
     tx
 }
 

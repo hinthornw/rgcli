@@ -5,7 +5,8 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::api::sse::{
-    SseEvent, extract_run_id, is_end_event, is_message_event, is_metadata_event, parse_sse,
+    SseEvent, extract_feedback_urls, extract_run_id, is_end_event, is_feedback_event,
+    is_message_event, is_metadata_event, parse_sse,
 };
 use crate::api::types::{
     Attachment, Thread, ThreadState, extract_tool_calls, is_ai_chunk, is_tool_chunk,
@@ -27,6 +28,8 @@ pub enum StreamEvent {
     ToolUse(String, String),
     /// Tool result received (tool name, content).
     ToolResult(String, String),
+    /// Feedback presigned URLs (key → url).
+    FeedbackUrls(std::collections::HashMap<String, String>),
     /// Stream completed (Ok or Err).
     Done(Result<()>),
 }
@@ -458,6 +461,12 @@ fn handle_sse(
     if is_metadata_event(&event) {
         if let Some(run_id) = extract_run_id(&event) {
             let _ = tx.send(StreamEvent::RunStarted(run_id));
+        }
+        return;
+    }
+    if is_feedback_event(&event) {
+        if let Some(urls) = extract_feedback_urls(&event) {
+            let _ = tx.send(StreamEvent::FeedbackUrls(urls));
         }
         return;
     }

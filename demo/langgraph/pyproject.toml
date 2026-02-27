@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ailsd-ssap-demo"
+version = "0.1.0"
+description = "SSAP MVP demo server for ailsd"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph-cli[inmem]>=0.1.72",
+  "langgraph>=0.4.10",
+  "starlette>=0.38.0",
+  "httpx>=0.27.0",
+  "pyjwt>=2.9.0",
+  "typing_extensions>=4.13.0",
+  "lsandbox-py"
+]
+
+[tool.setuptools]
+py-modules = ["agent", "sandbox_sessions_app"]
+
+[tool.uv.sources]
+lsandbox-py = { path = "../../crates/langsmith-sandbox-py" }

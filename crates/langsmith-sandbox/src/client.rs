@@ -1,4 +1,5 @@
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::Deserialize;
 
 use super::error::{SandboxError, parse_http_error};
 use super::models::*;
@@ -20,6 +21,11 @@ impl SandboxClient {
     pub fn new(api_key: &str) -> Result<Self, SandboxError> {
         let endpoint =
             std::env::var("LANGSMITH_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string());
+        Self::new_with_endpoint(api_key, &endpoint)
+    }
+
+    /// Create a new sandbox client with an explicit LangSmith endpoint.
+    pub fn new_with_endpoint(api_key: &str, endpoint: &str) -> Result<Self, SandboxError> {
         let base_url = format!("{}/v2/sandboxes", endpoint.trim_end_matches('/'));
 
         let mut headers = HeaderMap::new();
@@ -130,7 +136,20 @@ impl SandboxClient {
 
     /// List all sandboxes.
     pub async fn list_sandboxes(&self) -> Result<Vec<SandboxInfo>, SandboxError> {
-        self.get_json("/boxes").await
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum BoxesResponse {
+            Direct(Vec<SandboxInfo>),
+            Wrapped { boxes: Vec<SandboxInfo> },
+            WrappedSandboxes { sandboxes: Vec<SandboxInfo> },
+        }
+
+        let parsed: BoxesResponse = self.get_json("/boxes").await?;
+        Ok(match parsed {
+            BoxesResponse::Direct(items) => items,
+            BoxesResponse::Wrapped { boxes } => boxes,
+            BoxesResponse::WrappedSandboxes { sandboxes } => sandboxes,
+        })
     }
 
     /// Delete a sandbox by name.
@@ -161,7 +180,18 @@ impl SandboxClient {
 
     /// List all templates.
     pub async fn list_templates(&self) -> Result<Vec<SandboxTemplate>, SandboxError> {
-        self.get_json("/templates").await
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum TemplatesResponse {
+            Direct(Vec<SandboxTemplate>),
+            Wrapped { templates: Vec<SandboxTemplate> },
+        }
+
+        let parsed: TemplatesResponse = self.get_json("/templates").await?;
+        Ok(match parsed {
+            TemplatesResponse::Direct(items) => items,
+            TemplatesResponse::Wrapped { templates } => templates,
+        })
     }
 
     /// Delete a template by name.

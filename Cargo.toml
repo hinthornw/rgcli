@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/langsmith-sandbox"]
+members = [".", "crates/langsmith-sandbox", "crates/langsmith-sandbox-py"]
 
 [package]
 name = "ailsd"

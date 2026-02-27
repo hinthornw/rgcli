@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "lsandbox-py"
+version = "0.1.0"
+description = "PyO3 bindings for the LangSmith sandbox Rust SDK"
+requires-python = ">=3.11"
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "lsandbox_py"
+manifest-path = "Cargo.toml"

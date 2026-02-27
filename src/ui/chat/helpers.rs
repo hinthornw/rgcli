@@ -161,6 +161,8 @@ pub(super) fn show_help(app: &mut ChatState) {
         ("/bench", "Run load test"),
         ("/doctor", "Diagnose connectivity"),
         ("/configure", "Update connection settings"),
+        ("/sandbox", "Sandbox helpers and session terminals"),
+        ("/terminal", "Toggle pane or connect /terminal session [id]"),
         ("/export", "Export conversation to markdown"),
         ("/clear", "Clear chat display"),
         ("/devtools", "Toggle developer toolbar (F12)"),

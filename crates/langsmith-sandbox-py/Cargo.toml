@@ -1,0 +1,15 @@
+[package]
+name = "lsandbox-py"
+version = "0.1.0"
+edition = "2024"
+description = "PyO3 bindings for the LangSmith sandbox Rust SDK"
+license = "MIT"
+
+[lib]
+name = "lsandbox_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+lsandbox = { path = "../langsmith-sandbox" }
+pyo3 = { version = "0.23.5", features = ["extension-module", "abi3-py311"] }
+pyo3-async-runtimes = { version = "0.23.0", features = ["tokio-runtime"] }

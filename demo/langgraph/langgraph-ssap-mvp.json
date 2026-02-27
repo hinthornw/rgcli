@@ -1,0 +1,19 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.13",
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "agent": {
+      "path": "./agent.py:graph",
+      "description": "minimal graph for dev server startup"
+    }
+  },
+  "http": {
+    "app": "./sandbox_sessions_app.py:app",
+    "enable_custom_route_auth": true,
+    "disable_mcp": false,
+    "disable_a2a": false
+  }
+}

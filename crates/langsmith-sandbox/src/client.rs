@@ -1,4 +1,5 @@
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::Deserialize;
 
 use super::error::{SandboxError, parse_http_error};
 use super::models::*;
@@ -20,6 +21,11 @@ impl SandboxClient {
     pub fn new(api_key: &str) -> Result<Self, SandboxError> {
         let endpoint =
             std::env::var("LANGSMITH_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string());
+        Self::new_with_endpoint(api_key, &endpoint)
+    }
+
+    /// Create a new sandbox client with an explicit LangSmith endpoint.
+    pub fn new_with_endpoint(api_key: &str, endpoint: &str) -> Result<Self, SandboxError> {
         let base_url = format!("{}/v2/sandboxes", endpoint.trim_end_matches('/'));
 
         let mut headers = HeaderMap::new();
@@ -41,10 +47,9 @@ impl SandboxClient {
         })
     }
 
-    /// Build an HTTP client for dataplane operations (includes API key auth).
-    fn dataplane_http(&self) -> reqwest::Client {
+    fn dataplane_http_for(api_key: &str) -> reqwest::Client {
         let mut headers = HeaderMap::new();
-        if let Ok(val) = HeaderValue::from_str(&self.api_key) {
+        if let Ok(val) = HeaderValue::from_str(api_key) {
             headers.insert("X-Api-Key", val);
         }
         reqwest::Client::builder()
@@ -52,6 +57,36 @@ impl SandboxClient {
             .user_agent("ailsd-sandbox")
             .build()
             .unwrap_or_default()
+    }
+
+    /// Build an HTTP client for dataplane operations (includes API key auth).
+    fn dataplane_http(&self) -> reqwest::Client {
+        Self::dataplane_http_for(&self.api_key)
+    }
+
+    /// Construct a sandbox handle for a known dataplane URL and auth token.
+    ///
+    /// This is useful for server-issued relay sessions where the dataplane URL
+    /// and token come from a separate control plane.
+    pub fn sandbox_from_dataplane(
+        &self,
+        name: &str,
+        dataplane_url: &str,
+        auth_token: &str,
+    ) -> Sandbox {
+        let info = SandboxInfo {
+            name: name.to_string(),
+            template_name: "relay".to_string(),
+            dataplane_url: Some(dataplane_url.trim_end_matches('/').to_string()),
+            id: None,
+            created_at: None,
+            updated_at: None,
+        };
+        Sandbox::new(
+            info,
+            Self::dataplane_http_for(auth_token),
+            auth_token.to_string(),
+        )
     }
 
     // ── Helpers ──
@@ -130,7 +165,20 @@ impl SandboxClient {
 
     /// List all sandboxes.
     pub async fn list_sandboxes(&self) -> Result<Vec<SandboxInfo>, SandboxError> {
-        self.get_json("/boxes").await
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum BoxesResponse {
+            Direct(Vec<SandboxInfo>),
+            Wrapped { boxes: Vec<SandboxInfo> },
+            WrappedSandboxes { sandboxes: Vec<SandboxInfo> },
+        }
+
+        let parsed: BoxesResponse = self.get_json("/boxes").await?;
+        Ok(match parsed {
+            BoxesResponse::Direct(items) => items,
+            BoxesResponse::Wrapped { boxes } => boxes,
+            BoxesResponse::WrappedSandboxes { sandboxes } => sandboxes,
+        })
     }
 
     /// Delete a sandbox by name.
@@ -161,7 +209,18 @@ impl SandboxClient {
 
     /// List all templates.
     pub async fn list_templates(&self) -> Result<Vec<SandboxTemplate>, SandboxError> {
-        self.get_json("/templates").await
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum TemplatesResponse {
+            Direct(Vec<SandboxTemplate>),
+            Wrapped { templates: Vec<SandboxTemplate> },
+        }
+
+        let parsed: TemplatesResponse = self.get_json("/templates").await?;
+        Ok(match parsed {
+            TemplatesResponse::Direct(items) => items,
+            TemplatesResponse::Wrapped { templates } => templates,
+        })
     }
 
     /// Delete a template by name.

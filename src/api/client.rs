@@ -9,9 +9,10 @@ use crate::api::sse::{
     is_message_event, is_metadata_event, parse_sse,
 };
 use crate::api::types::{
-    Attachment, Thread, ThreadState, extract_tool_calls, is_ai_chunk, is_tool_chunk,
-    message_chunk_content, new_resume_request, new_run_request, new_run_request_with_attachments,
-    parse_message_chunk,
+    Attachment, SandboxSessionAcquireRequest, SandboxSessionAcquireResponse, SandboxSessionMode,
+    SandboxSessionRefreshResponse, Thread, ThreadState, extract_tool_calls, is_ai_chunk,
+    is_tool_chunk, message_chunk_content, new_resume_request, new_run_request,
+    new_run_request_with_attachments, parse_message_chunk,
 };
 use crate::config::Config;
 
@@ -159,6 +160,102 @@ impl Client {
         )
         .await?;
         Ok(())
+    }
+
+    pub async fn acquire_sandbox_session(
+        &self,
+        thread_id: &str,
+        mode: SandboxSessionMode,
+    ) -> Result<SandboxSessionAcquireResponse> {
+        let url = format!("{}/v1/sandbox/sessions", self.endpoint);
+        let request = SandboxSessionAcquireRequest {
+            thread_id: thread_id.to_string(),
+            mode,
+        };
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .json(&request)
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "acquire sandbox session").await?;
+        Ok(resp.json::<SandboxSessionAcquireResponse>().await?)
+    }
+
+    pub async fn refresh_sandbox_session(
+        &self,
+        session_id: &str,
+    ) -> Result<SandboxSessionRefreshResponse> {
+        let url = format!(
+            "{}/v1/sandbox/sessions/{}/refresh",
+            self.endpoint, session_id
+        );
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .json(&serde_json::json!({}))
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "refresh sandbox session").await?;
+        Ok(resp.json::<SandboxSessionRefreshResponse>().await?)
+    }
+
+    pub async fn release_sandbox_session(&self, session_id: &str) -> Result<()> {
+        let url = format!("{}/v1/sandbox/sessions/{}", self.endpoint, session_id);
+        let resp = self
+            .http
+            .delete(&url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::NO_CONTENT],
+            "release sandbox session",
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_sandbox_session(
+        &self,
+        session_id: &str,
+    ) -> Result<SandboxSessionAcquireResponse> {
+        let url = format!("{}/v1/sandbox/sessions/{}", self.endpoint, session_id);
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "get sandbox session").await?;
+        Ok(resp.json::<SandboxSessionAcquireResponse>().await?)
+    }
+
+    pub async fn relay_execute_sandbox_session(
+        &self,
+        http_base_url: &str,
+        token: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<Value> {
+        let url = format!("{}/execute", http_base_url.trim_end_matches('/'));
+        let payload = serde_json::json!({
+            "command": command,
+            "timeout_secs": timeout_secs,
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "relay sandbox execute").await?;
+        Ok(resp.json::<Value>().await?)
     }
 
     pub async fn create_thread(&self) -> Result<Thread> {

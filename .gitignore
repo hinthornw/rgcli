@@ -2,3 +2,7 @@ target
 dist
 .DS_Store
 ailsd-export-*.md
+.venv/
+__pycache__/
+*.egg-info/
+.langgraph_api/

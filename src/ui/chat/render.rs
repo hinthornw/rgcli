@@ -343,6 +343,25 @@ pub(super) fn render_input(frame: &mut ratatui::Frame, app: &mut ChatState, area
     }
 }
 
+pub(super) fn render_input_unfocused(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::new().fg(Color::Rgb(60, 60, 60)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Render textarea dimmed (no cursor)
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let text: String = app.textarea.lines().join("\n");
+    let display = if text.is_empty() {
+        "(chat input — Ctrl+` to focus)"
+    } else {
+        &text
+    };
+    let paragraph = Paragraph::new(Span::styled(display, dim_style));
+    frame.render_widget(paragraph, inner);
+}
+
 pub(super) fn render_devtools(frame: &mut ratatui::Frame, app: &ChatState, area: Rect) {
     let bg = Style::new().fg(Color::White).bg(Color::Rgb(40, 40, 40));
     let dim = Style::new().fg(Color::DarkGray).bg(Color::Rgb(40, 40, 40));

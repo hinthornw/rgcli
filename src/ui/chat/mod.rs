@@ -2,6 +2,7 @@ mod helpers;
 mod input;
 mod markdown;
 mod render;
+pub(crate) mod sandbox_pane;
 mod streaming;
 
 use std::collections::VecDeque;
@@ -13,7 +14,7 @@ use ratatui::text::Line;
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
-use crate::api::types::Attachment;
+use crate::api::types::{Attachment, SandboxSessionMode};
 use crate::api::{Client, StreamEvent};
 use crate::ui::mascot::{Parrot, ParrotState};
 
@@ -185,11 +186,20 @@ pub struct ChatState {
     pub(crate) feedback_prompt_shown: bool,
     pub(crate) session_start: Instant,
 
+    // Sandbox terminal pane
+    pub(crate) sandbox_terminal: Option<sandbox_pane::SandboxTerminal>,
+    pub(crate) terminal_focused: bool,
+
     // Sandbox async results
     pub(crate) sandbox_rx:
         Option<mpsc::UnboundedReceiver<Result<Vec<lsandbox::SandboxInfo>, lsandbox::SandboxError>>>,
-    pub(crate) sandbox_template_rx:
-        Option<mpsc::UnboundedReceiver<Result<Vec<lsandbox::SandboxTemplate>, lsandbox::SandboxError>>>,
+    pub(crate) sandbox_template_rx: Option<
+        mpsc::UnboundedReceiver<Result<Vec<lsandbox::SandboxTemplate>, lsandbox::SandboxError>>,
+    >,
+    pub(crate) sandbox_connect_rx:
+        Option<mpsc::UnboundedReceiver<Result<sandbox_pane::SandboxTerminal, String>>>,
+    pub(crate) shared_sandbox_session_id: Option<String>,
+    pub(crate) shared_sandbox_id: Option<String>,
 }
 
 impl ChatState {
@@ -242,8 +252,13 @@ impl ChatState {
             history_rx: None,
             feedback_prompt_shown: false,
             session_start: Instant::now(),
+            sandbox_terminal: None,
+            terminal_focused: false,
             sandbox_rx: None,
             sandbox_template_rx: None,
+            sandbox_connect_rx: None,
+            shared_sandbox_session_id: None,
+            shared_sandbox_id: None,
         }
     }
 
@@ -472,6 +487,18 @@ impl ChatState {
     }
 
     pub fn draw_in_area(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let has_terminal = self.sandbox_terminal.is_some();
+
+        // If terminal is active, split the area horizontally
+        let (chat_area, terminal_area) = if has_terminal {
+            let split = Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(area);
+            (split[0], Some(split[1]))
+        } else {
+            (area, None)
+        };
+
+        // Render chat in its area
         let input_height = (self.textarea.lines().len().clamp(1, MAX_INPUT_LINES) as u16) + 2;
         let status_height = if self.search_mode || self.scroll_mode {
             2
@@ -489,13 +516,17 @@ impl ChatState {
                 Constraint::Length(devtools_height),
                 Constraint::Length(status_height),
             ])
-            .split(area);
+            .split(chat_area);
 
             if self.show_header {
                 render::render_header(frame, self, chunks[0]);
             }
             render::render_chat(frame, self, chunks[1]);
-            render::render_input(frame, self, chunks[2]);
+            if !self.terminal_focused {
+                render::render_input(frame, self, chunks[2]);
+            } else {
+                render::render_input_unfocused(frame, self, chunks[2]);
+            }
             render::render_devtools(frame, self, chunks[3]);
             render::render_status(frame, self, chunks[4]);
         } else {
@@ -505,14 +536,23 @@ impl ChatState {
                 Constraint::Length(input_height),
                 Constraint::Length(status_height),
             ])
-            .split(area);
+            .split(chat_area);
 
             if self.show_header {
                 render::render_header(frame, self, chunks[0]);
             }
             render::render_chat(frame, self, chunks[1]);
-            render::render_input(frame, self, chunks[2]);
+            if !self.terminal_focused {
+                render::render_input(frame, self, chunks[2]);
+            } else {
+                render::render_input_unfocused(frame, self, chunks[2]);
+            }
             render::render_status(frame, self, chunks[3]);
+        }
+
+        // Render terminal pane
+        if let (Some(area), Some(term)) = (terminal_area, &self.sandbox_terminal) {
+            term.render(frame, area, self.terminal_focused);
         }
     }
 
@@ -550,6 +590,13 @@ impl ChatState {
                 }
             }
         });
+    }
+
+    /// Poll sandbox terminal for new output.
+    pub fn poll_terminal(&mut self) {
+        if let Some(term) = &mut self.sandbox_terminal {
+            term.poll();
+        }
     }
 
     /// Poll for sandbox async results.
@@ -611,6 +658,26 @@ impl ChatState {
                 }
                 self.auto_scroll = true;
                 self.sandbox_template_rx = None;
+            }
+        }
+        if let Some(rx) = &mut self.sandbox_connect_rx {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(term) => {
+                        self.messages.push(ChatMessage::System(format!(
+                            "Connected to sandbox '{}'. Press Ctrl+` to toggle focus.",
+                            term.sandbox_name
+                        )));
+                        self.sandbox_terminal = Some(term);
+                        self.terminal_focused = true;
+                    }
+                    Err(e) => {
+                        self.messages
+                            .push(ChatMessage::Error(format!("Terminal connect failed: {e}")));
+                    }
+                }
+                self.auto_scroll = true;
+                self.sandbox_connect_rx = None;
             }
         }
     }
@@ -694,6 +761,22 @@ pub async fn run_chat_loop(
     app.available_assistants = chat_config.available_assistants.clone();
     app.tenant_id = chat_config.tenant_id.clone();
     app.project_id = chat_config.project_id.clone();
+    if let Ok(binding) = client
+        .acquire_sandbox_session(thread_id, SandboxSessionMode::Ensure)
+        .await
+    {
+        app.shared_sandbox_session_id = Some(binding.session_id.clone());
+        app.shared_sandbox_id = Some(binding.sandbox.id.clone());
+        app.messages.push(ChatMessage::System(format!(
+            "Shared sandbox ready: session={} sandbox={}",
+            binding.session_id, binding.sandbox.id
+        )));
+    } else {
+        crate::debug_log::log(
+            "chat",
+            "shared sandbox session not available on this server/context",
+        );
+    }
 
     // Fetch deployment info
     let deploy_info = match client.get_info().await {
@@ -771,6 +854,13 @@ pub async fn run_chat_loop(
     ];
     if let Some(info) = &deploy_info {
         app.header_info.push(info.clone());
+    }
+    if let Some(session_id) = &app.shared_sandbox_session_id {
+        let mut line = format!("sandbox session: {session_id}");
+        if let Some(sandbox_id) = &app.shared_sandbox_id {
+            line.push_str(&format!(" ({sandbox_id})"));
+        }
+        app.header_info.push(line);
     }
     app.header_info
         .push(format!("tip: {}", helpers::random_tip()));

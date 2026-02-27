@@ -346,21 +346,22 @@ pub fn python_config_to_docker(
     let env_vars = build_config_env_vars(config);
 
     // JS install
-    let js_inst_str = if (config.ui.is_some() || config.node_version.is_some())
-        && local_deps.working_dir.is_some()
-    {
-        let node_version = config
-            .node_version
-            .as_deref()
-            .unwrap_or(DEFAULT_NODE_VERSION);
-        let install_cmd_node = get_node_pm_install_cmd(config_path, config);
-        let wd = local_deps.working_dir.as_ref().unwrap();
-        format!(
-            "# -- Installing JS dependencies --\n\
-                 ENV NODE_VERSION={node_version}\n\
-                 RUN cd {wd} && {install_cmd_node} && tsx /api/langgraph_api/js/build.mts\n\
-                 # -- End of JS dependencies install --"
-        )
+    let js_inst_str = if config.ui.is_some() || config.node_version.is_some() {
+        if let Some(wd) = local_deps.working_dir.as_ref() {
+            let node_version = config
+                .node_version
+                .as_deref()
+                .unwrap_or(DEFAULT_NODE_VERSION);
+            let install_cmd_node = get_node_pm_install_cmd(config_path, config);
+            format!(
+                "# -- Installing JS dependencies --\n\
+                     ENV NODE_VERSION={node_version}\n\
+                     RUN cd {wd} && {install_cmd_node} && tsx /api/langgraph_api/js/build.mts\n\
+                     # -- End of JS dependencies install --"
+            )
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };

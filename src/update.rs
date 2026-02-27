@@ -207,9 +207,7 @@ pub fn pending_update_notice() -> Option<String> {
     let latest = state.latest_version.as_ref()?;
     let current = current_version();
     if is_newer(latest, &current) {
-        Some(format!(
-            "Update {latest} available! /restart to update",
-        ))
+        Some(format!("Update {latest} available! /restart to update",))
     } else {
         None
     }

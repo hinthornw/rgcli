@@ -9,11 +9,8 @@ use crate::ui::styles;
 
 pub(super) fn render_header(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
     // Split: parrot on left (~1/3), info on right (~2/3)
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(33),
-        Constraint::Percentage(67),
-    ])
-    .split(area);
+    let chunks =
+        Layout::horizontal([Constraint::Percentage(33), Constraint::Percentage(67)]).split(area);
 
     // Tell parrot how wide its box is so it can pace
     app.parrot.box_width = chunks[0].width;
@@ -35,7 +32,9 @@ pub(super) fn render_header(frame: &mut ratatui::Frame, app: &mut ChatState, are
 
     // Render info lines beside the parrot
     let title_style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let info_style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+    let info_style = Style::new()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::ITALIC);
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, text) in app.header_info.iter().enumerate() {
@@ -519,10 +518,7 @@ pub(super) fn render_status(frame: &mut ratatui::Frame, app: &mut ChatState, are
 }
 
 fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect) {
-    let mut left_parts: Vec<Span> = vec![
-        Span::raw(" "),
-        Span::raw(&app.context_name),
-    ];
+    let mut left_parts: Vec<Span> = vec![Span::raw(" "), Span::raw(&app.context_name)];
 
     left_parts.push(Span::styled(
         format!(" | {}", app.assistant_id),
@@ -573,12 +569,7 @@ fn render_status_bar(frame: &mut ratatui::Frame, app: &mut ChatState, area: Rect
     let msg_count = app
         .messages
         .iter()
-        .filter(|m| {
-            matches!(
-                m,
-                ChatMessage::User(_) | ChatMessage::Assistant(_)
-            )
-        })
+        .filter(|m| matches!(m, ChatMessage::User(_) | ChatMessage::Assistant(_)))
         .count();
     if msg_count > 0 {
         left_parts.push(Span::styled(

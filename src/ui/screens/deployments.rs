@@ -439,10 +439,7 @@ impl DeploymentsScreen {
             if len <= 4 {
                 "*".repeat(len)
             } else {
-                format!("{}{}",
-                    "*".repeat(len - 4),
-                    &self.api_key_buf[len - 4..]
-                )
+                format!("{}{}", "*".repeat(len - 4), &self.api_key_buf[len - 4..])
             }
         };
 

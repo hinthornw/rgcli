@@ -8,17 +8,17 @@ all: format lint build test
 build:
 	cargo build --release
 
-## test: Run tests
+## test: Run all workspace tests
 test:
-	cargo test
+	cargo test --workspace
 
-## lint: Run clippy
+## lint: Run clippy on workspace
 lint:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 ## format: Format code
 format:
-	cargo fmt
+	cargo fmt --all
 
 ## clean: Clean build artifacts and config
 clean:
@@ -32,7 +32,7 @@ install:
 run: build
 	./target/release/$(BINARY)
 
-## check-version: Verify Cargo.toml version has a matching git tag
+## check-version: Verify ailsd Cargo.toml version has a matching git tag
 check-version:
 	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	if git rev-parse "v$$cargo_ver" >/dev/null 2>&1; then \
@@ -41,13 +41,30 @@ check-version:
 	fi; \
 	echo "Version $$cargo_ver is available for tagging"
 
-## release: Bump version, tag, and push (usage: make release)
+## release: Tag and push ailsd release (usage: make release)
 release: all check-version
 	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	echo "Releasing v$$cargo_ver..."; \
 	git tag "v$$cargo_ver" && \
 	git push origin main --tags && \
 	echo "Released v$$cargo_ver"
+
+## check-version-lsandbox: Verify lsandbox version has a matching git tag
+check-version-lsandbox:
+	@cargo_ver=$$(grep '^version' crates/langsmith-sandbox/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	if git rev-parse "lsandbox-v$$cargo_ver" >/dev/null 2>&1; then \
+		echo "Tag lsandbox-v$$cargo_ver already exists — bump version in crates/langsmith-sandbox/Cargo.toml first"; \
+		exit 1; \
+	fi; \
+	echo "lsandbox version $$cargo_ver is available for tagging"
+
+## release-lsandbox: Tag and push lsandbox release (usage: make release-lsandbox)
+release-lsandbox: all check-version-lsandbox
+	@cargo_ver=$$(grep '^version' crates/langsmith-sandbox/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	echo "Releasing lsandbox-v$$cargo_ver..."; \
+	git tag "lsandbox-v$$cargo_ver" && \
+	git push origin main --tags && \
+	echo "Released lsandbox-v$$cargo_ver"
 
 ## help: Show this help
 help:

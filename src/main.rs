@@ -1076,15 +1076,30 @@ async fn run(resume: bool, thread_id_arg: Option<&str>) -> Result<()> {
                     Err(e) => {
                         eprintln!("\nFailed to connect to context \"{name}\": {e}");
                         eprintln!("  Endpoint: {}", cfg.endpoint);
-                        eprintln!("  API key:  {}", if cfg.api_key.is_empty() { "(not set)" } else { "(set)" });
+                        eprintln!(
+                            "  API key:  {}",
+                            if cfg.api_key.is_empty() {
+                                "(not set)"
+                            } else {
+                                "(set)"
+                            }
+                        );
                         if !cfg.custom_headers.is_empty() {
-                            eprintln!("  Custom headers: {}", cfg.custom_headers.keys().cloned().collect::<Vec<_>>().join(", "));
+                            eprintln!(
+                                "  Custom headers: {}",
+                                cfg.custom_headers
+                                    .keys()
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
                         }
                         eprintln!("\nWould you like to reconfigure this context? [Y/n] ");
                         let mut answer = String::new();
                         let _ = std::io::stdin().read_line(&mut answer);
                         if !answer.trim().eq_ignore_ascii_case("n") {
-                            let new_cfg = run_configure_inner(Some(&cfg)).context("configuration failed")?;
+                            let new_cfg =
+                                run_configure_inner(Some(&cfg)).context("configuration failed")?;
                             config::save_context(&name, &new_cfg)?;
                             cfg = new_cfg;
                             client = Client::new(&cfg)?;

@@ -89,16 +89,19 @@ impl ThreadsScreen {
                         .iter()
                         .map(|t| {
                             let id_short: String = t.thread_id.chars().take(12).collect();
-                            let status = t
-                                .status
-                                .as_deref()
-                                .unwrap_or("-")
-                                .to_string();
+                            let status = t.status.as_deref().unwrap_or("-").to_string();
                             let created = format_local_time(t.created_at.as_deref());
                             let updated = format_local_time(t.updated_at.as_deref());
                             let last_msg = extract_last_message(&t.values);
                             // Append full ID as hidden column
-                            vec![id_short, status, created, updated, last_msg, t.thread_id.clone()]
+                            vec![
+                                id_short,
+                                status,
+                                created,
+                                updated,
+                                last_msg,
+                                t.thread_id.clone(),
+                            ]
                         })
                         .collect();
                     let _ = tx.send(AsyncResult::Rows(rows));
@@ -402,13 +405,10 @@ fn extract_last_message(values: &Option<serde_json::Value>) -> String {
         return "-".to_string();
     };
     // values.messages is typically an array of message objects
-    let messages = vals
-        .get("messages")
-        .and_then(|m| m.as_array())
-        .or_else(|| {
-            // Some threads have values as an array directly
-            vals.as_array()
-        });
+    let messages = vals.get("messages").and_then(|m| m.as_array()).or_else(|| {
+        // Some threads have values as an array directly
+        vals.as_array()
+    });
     let Some(msgs) = messages else {
         return "-".to_string();
     };

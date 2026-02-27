@@ -42,4 +42,3 @@ pub fn print_error(msg: &str) -> String {
 pub fn system_text(msg: &str) -> String {
     system_style(msg)
 }
-

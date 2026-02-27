@@ -80,7 +80,7 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "/sandbox",
-        desc: "List/manage sandboxes and session terminals",
+        desc: "Show shared sandbox session status",
     },
     SlashCommand {
         name: "/terminal",
@@ -802,80 +802,29 @@ fn to_textarea_input(key: KeyEvent) -> Option<Input> {
 fn handle_sandbox_command(app: &mut ChatState, args: &str) {
     use super::ChatMessage;
     match args {
-        "" | "list" => {
-            let api_key = match configured_api_key() {
-                Ok(key) => key,
-                Err(err) => {
-                    app.messages.push(ChatMessage::Error(err));
-                    return;
-                }
-            };
-            let client = match lsandbox::SandboxClient::new(&api_key) {
-                Ok(c) => c,
-                Err(e) => {
-                    app.messages
-                        .push(ChatMessage::Error(format!("Sandbox client error: {e}")));
-                    return;
-                }
-            };
-
-            app.messages
-                .push(ChatMessage::System("Loading sandboxes...".to_string()));
-            app.auto_scroll = true;
-
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            app.sandbox_rx = Some(rx);
-            tokio::spawn(async move {
-                let result = client.list_sandboxes().await;
-                let _ = tx.send(result);
-            });
-        }
-        "templates" => {
-            let api_key = match configured_api_key() {
-                Ok(key) => key,
-                Err(err) => {
-                    app.messages.push(ChatMessage::Error(err));
-                    return;
-                }
-            };
-            let client = match lsandbox::SandboxClient::new(&api_key) {
-                Ok(c) => c,
-                Err(e) => {
-                    app.messages
-                        .push(ChatMessage::Error(format!("Sandbox client error: {e}")));
-                    return;
-                }
-            };
-
-            app.messages
-                .push(ChatMessage::System("Loading templates...".to_string()));
-            app.auto_scroll = true;
-
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            app.sandbox_template_rx = Some(rx);
-            tokio::spawn(async move {
-                let result = client.list_templates().await;
-                let _ = tx.send(result);
-            });
+        "" | "status" => {
+            if let Some(session_id) = &app.shared_sandbox_session_id {
+                let sandbox = app
+                    .shared_sandbox_id
+                    .as_deref()
+                    .unwrap_or("(unknown-sandbox)");
+                app.messages.push(ChatMessage::System(format!(
+                    "Shared sandbox session: {session_id} (sandbox: {sandbox})"
+                )));
+                app.messages.push(ChatMessage::System(
+                    "Use /terminal session to connect.".to_string(),
+                ));
+            } else {
+                app.messages.push(ChatMessage::System(
+                    "No shared sandbox session in this chat context.".to_string(),
+                ));
+                app.messages.push(ChatMessage::System(
+                    "This server may not support negotiated sandbox sessions.".to_string(),
+                ));
+            }
         }
         other => {
-            if let Some(name) = other.strip_prefix("connect ") {
-                let name = name.trim();
-                if name.is_empty() {
-                    app.messages.push(ChatMessage::System(
-                        "Usage: /sandbox connect <name>".to_string(),
-                    ));
-                    return;
-                }
-                let api_key = match configured_api_key() {
-                    Ok(key) => key,
-                    Err(err) => {
-                        app.messages.push(ChatMessage::Error(err));
-                        return;
-                    }
-                };
-                connect_sandbox_terminal(app, name, &api_key);
-            } else if let Some(rest) = other.strip_prefix("connect-session") {
+            if let Some(rest) = other.strip_prefix("connect-session") {
                 let sid = rest.trim();
                 if sid.is_empty() {
                     if let Some(current) = app.shared_sandbox_session_id.clone() {
@@ -890,8 +839,7 @@ fn handle_sandbox_command(app: &mut ChatState, args: &str) {
                 connect_session_terminal(app, sid);
             } else {
                 app.messages.push(ChatMessage::System(
-                    "Usage: /sandbox [list|templates|connect <name>|connect-session <session-id>]"
-                        .to_string(),
+                    "Usage: /sandbox [status|connect-session <session-id>]".to_string(),
                 ));
             }
         }
@@ -909,7 +857,7 @@ fn handle_terminal_command(app: &mut ChatState, args: &str) {
             return;
         }
         app.messages.push(ChatMessage::System(
-            "No terminal connected. Use /terminal <sandbox-name> or /terminal session [session-id].".to_string(),
+            "No terminal connected. Use /terminal session [session-id].".to_string(),
         ));
         return;
     }
@@ -940,49 +888,10 @@ fn handle_terminal_command(app: &mut ChatState, args: &str) {
         }
         return;
     }
-
-    // Connect to sandbox by name
-    let api_key = match configured_api_key() {
-        Ok(key) => key,
-        Err(err) => {
-            app.messages.push(ChatMessage::Error(err));
-            return;
-        }
-    };
-
-    connect_sandbox_terminal(app, args, &api_key);
-}
-
-fn connect_sandbox_terminal(app: &mut ChatState, name: &str, api_key: &str) {
-    use super::ChatMessage;
-    use super::sandbox_pane::SandboxTerminal;
-
-    // Kill existing terminal if any
-    if let Some(mut term) = app.sandbox_terminal.take() {
-        term.kill();
-    }
-
-    app.messages.push(ChatMessage::System(format!(
-        "Connecting to sandbox '{name}'..."
-    )));
-    app.auto_scroll = true;
-
-    let name = name.to_string();
-    let api_key = api_key.to_string();
-
-    // Use a channel to send the connected terminal back
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    app.sandbox_connect_rx = Some(rx);
-    tokio::spawn(async move {
-        match SandboxTerminal::connect(&name, &api_key).await {
-            Ok(term) => {
-                let _ = tx.send(Ok(term));
-            }
-            Err(e) => {
-                let _ = tx.send(Err(e));
-            }
-        }
-    });
+    app.messages.push(ChatMessage::System(
+        "Only session-based terminals are supported in chat. Use /terminal session [session-id]."
+            .to_string(),
+    ));
 }
 
 fn connect_session_terminal(app: &mut ChatState, session_id: &str) {
@@ -1011,17 +920,4 @@ fn connect_session_terminal(app: &mut ChatState, session_id: &str) {
             }
         }
     });
-}
-
-fn configured_api_key() -> Result<String, String> {
-    let cfg = crate::config::load().map_err(|e| format!("Config error: {e}"))?;
-    let key = if cfg.api_key.is_empty() {
-        std::env::var("LANGSMITH_API_KEY").unwrap_or_default()
-    } else {
-        cfg.api_key
-    };
-    if key.is_empty() {
-        return Err("No API key configured.".to_string());
-    }
-    Ok(key)
 }

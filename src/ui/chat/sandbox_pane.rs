@@ -32,19 +32,6 @@ pub(crate) struct SandboxTerminal {
 }
 
 impl SandboxTerminal {
-    /// Create a new terminal pane connected to a sandbox.
-    ///
-    /// Spawns a bash shell via WebSocket streaming.
-    pub async fn connect(sandbox_name: &str, api_key: &str) -> Result<Self, String> {
-        let client =
-            lsandbox::SandboxClient::new(api_key).map_err(|e| format!("Client error: {e}"))?;
-        let sandbox = client
-            .get_sandbox(sandbox_name)
-            .await
-            .map_err(|e| format!("Get sandbox: {e}"))?;
-        Self::connect_from_sandbox(sandbox, sandbox_name).await
-    }
-
     /// Create a new terminal pane connected to a server-issued sandbox session.
     pub async fn connect_session(session_id: &str) -> Result<Self, String> {
         let cfg = crate::config::load().map_err(|e| format!("Config error: {e}"))?;

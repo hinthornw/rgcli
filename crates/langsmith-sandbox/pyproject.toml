@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsandbox-rs-src"
+version = "0.0.1"
+description = "Internal placeholder package so LangGraph deployment can include Rust crate sources"
+requires-python = ">=3.11"
+
+[tool.setuptools]
+py-modules = []

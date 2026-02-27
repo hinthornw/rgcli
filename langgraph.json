@@ -3,6 +3,7 @@
   "python_version": "3.13",
   "dependencies": [
     "./demo/langgraph",
+    "./crates/langsmith-sandbox",
     "./crates/langsmith-sandbox-py"
   ],
   "graphs": {

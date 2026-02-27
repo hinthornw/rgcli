@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ailsd"
-version = "0.2.36"
+version = "0.2.37"
 dependencies = [
  "anyhow",
  "base64",

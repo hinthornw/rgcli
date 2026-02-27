@@ -83,6 +83,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "List or manage sandboxes",
     },
     SlashCommand {
+        name: "/terminal",
+        desc: "Toggle sandbox terminal pane",
+    },
+    SlashCommand {
         name: "/do-a-trick",
         desc: "Make the parrot do a trick",
     },
@@ -98,6 +102,38 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
     };
 
     app.last_interaction = Instant::now();
+
+    // Ctrl+` toggles focus between chat and terminal
+    if key.code == KeyCode::Char('`') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if app.sandbox_terminal.is_some() {
+            app.terminal_focused = !app.terminal_focused;
+        }
+        return Action::None;
+    }
+
+    // Route keys to terminal pane when focused
+    if app.terminal_focused {
+        if let Some(term) = &mut app.sandbox_terminal {
+            match key.code {
+                KeyCode::Enter => term.submit_input(),
+                KeyCode::Backspace => term.backspace(),
+                KeyCode::Delete => term.delete_char(),
+                KeyCode::Left => term.cursor_left(),
+                KeyCode::Right => term.cursor_right(),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Ctrl+C in terminal kills the shell
+                    term.kill();
+                    app.sandbox_terminal = None;
+                    app.terminal_focused = false;
+                    app.messages
+                        .push(super::ChatMessage::System("Terminal closed.".to_string()));
+                }
+                KeyCode::Char(c) => term.insert_char(c),
+                _ => {}
+            }
+        }
+        return Action::None;
+    }
 
     // Wake from sleep — consume the first keypress
     if *app.parrot.current_state() == super::super::mascot::ParrotState::Sleeping {
@@ -339,6 +375,12 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             if value == "/sandbox" || value.starts_with("/sandbox ") {
                 let args = value.strip_prefix("/sandbox").unwrap_or("").trim();
                 handle_sandbox_command(app, args);
+                super::helpers::reset_textarea(app);
+                return Action::None;
+            }
+            if value == "/terminal" || value.starts_with("/terminal ") {
+                let args = value.strip_prefix("/terminal").unwrap_or("").trim();
+                handle_terminal_command(app, args);
                 super::helpers::reset_textarea(app);
                 return Action::None;
             }
@@ -818,10 +860,105 @@ fn handle_sandbox_command(app: &mut ChatState, args: &str) {
                 let _ = tx.send(result);
             });
         }
-        _ => {
-            app.messages.push(ChatMessage::System(
-                "Usage: /sandbox [list|templates]".to_string(),
-            ));
+        other => {
+            if let Some(name) = other.strip_prefix("connect ") {
+                let name = name.trim();
+                if name.is_empty() {
+                    app.messages.push(ChatMessage::System(
+                        "Usage: /sandbox connect <name>".to_string(),
+                    ));
+                    return;
+                }
+                connect_sandbox_terminal(app, name, &api_key);
+            } else {
+                app.messages.push(ChatMessage::System(
+                    "Usage: /sandbox [list|templates|connect <name>]".to_string(),
+                ));
+            }
         }
     }
+}
+
+fn handle_terminal_command(app: &mut ChatState, args: &str) {
+    use super::ChatMessage;
+
+    // No args = toggle terminal pane
+    if args.is_empty() {
+        if app.sandbox_terminal.is_some() {
+            // Toggle focus
+            app.terminal_focused = !app.terminal_focused;
+            return;
+        }
+        app.messages.push(ChatMessage::System(
+            "No terminal connected. Use /terminal <sandbox-name> to connect.".to_string(),
+        ));
+        return;
+    }
+
+    // Close terminal
+    if args == "close" {
+        if let Some(mut term) = app.sandbox_terminal.take() {
+            term.kill();
+        }
+        app.terminal_focused = false;
+        app.messages
+            .push(ChatMessage::System("Terminal closed.".to_string()));
+        return;
+    }
+
+    // Connect to sandbox by name
+    let api_key = match crate::config::load() {
+        Ok(cfg) => {
+            let key = if cfg.api_key.is_empty() {
+                std::env::var("LANGSMITH_API_KEY").unwrap_or_default()
+            } else {
+                cfg.api_key
+            };
+            if key.is_empty() {
+                app.messages
+                    .push(ChatMessage::Error("No API key configured.".to_string()));
+                return;
+            }
+            key
+        }
+        Err(e) => {
+            app.messages
+                .push(ChatMessage::Error(format!("Config error: {e}")));
+            return;
+        }
+    };
+
+    connect_sandbox_terminal(app, args, &api_key);
+}
+
+fn connect_sandbox_terminal(app: &mut ChatState, name: &str, api_key: &str) {
+    use super::ChatMessage;
+    use super::sandbox_pane::SandboxTerminal;
+
+    // Kill existing terminal if any
+    if let Some(mut term) = app.sandbox_terminal.take() {
+        term.kill();
+    }
+
+    app.messages.push(ChatMessage::System(format!(
+        "Connecting to sandbox '{name}'..."
+    )));
+    app.auto_scroll = true;
+
+    let name = name.to_string();
+    let api_key = api_key.to_string();
+
+    // Use a channel to send the connected terminal back
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    app.sandbox_connect_rx = Some(rx);
+    tokio::spawn(async move {
+        match SandboxTerminal::connect(&name, &api_key).await {
+            Ok(term) => {
+                let _ = tx.send(Ok(term));
+            }
+            Err(e) => {
+                let _ = tx.send(Err(e));
+            }
+        }
+    });
 }

@@ -410,6 +410,30 @@ enum SandboxAction {
         /// Sandbox name
         name: String,
     },
+    /// Get an existing sandbox session for a thread
+    SessionGet {
+        /// Thread ID
+        #[arg(long, value_name = "THREAD_ID")]
+        thread: String,
+    },
+    /// Ensure a sandbox session exists for a thread
+    SessionEnsure {
+        /// Thread ID
+        #[arg(long, value_name = "THREAD_ID")]
+        thread: String,
+    },
+    /// Refresh a sandbox session token
+    SessionRefresh {
+        /// Session ID
+        #[arg(long, value_name = "SESSION_ID")]
+        session: String,
+    },
+    /// Release a sandbox session
+    SessionRelease {
+        /// Session ID
+        #[arg(long, value_name = "SESSION_ID")]
+        session: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -958,6 +982,18 @@ async fn main() -> Result<()> {
                     remote_path,
                 } => commands::sandbox::sync(&name, &path, &remote_path).await,
                 SandboxAction::Delete { name } => commands::sandbox::delete(&name).await,
+                SandboxAction::SessionGet { thread } => {
+                    commands::sandbox::session_get(&thread).await
+                }
+                SandboxAction::SessionEnsure { thread } => {
+                    commands::sandbox::session_ensure(&thread).await
+                }
+                SandboxAction::SessionRefresh { session } => {
+                    commands::sandbox::session_refresh(&session).await
+                }
+                SandboxAction::SessionRelease { session } => {
+                    commands::sandbox::session_release(&session).await
+                }
             };
             if let Err(err) = result {
                 eprintln!("{}", print_error(&err.to_string()));

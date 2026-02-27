@@ -9,9 +9,10 @@ use crate::api::sse::{
     is_message_event, is_metadata_event, parse_sse,
 };
 use crate::api::types::{
-    Attachment, Thread, ThreadState, extract_tool_calls, is_ai_chunk, is_tool_chunk,
-    message_chunk_content, new_resume_request, new_run_request, new_run_request_with_attachments,
-    parse_message_chunk,
+    Attachment, SandboxSessionAcquireRequest, SandboxSessionAcquireResponse, SandboxSessionMode,
+    SandboxSessionRefreshResponse, Thread, ThreadState, extract_tool_calls, is_ai_chunk,
+    is_tool_chunk, message_chunk_content, new_resume_request, new_run_request,
+    new_run_request_with_attachments, parse_message_chunk,
 };
 use crate::config::Config;
 
@@ -156,6 +157,63 @@ impl Client {
             resp,
             &[StatusCode::OK, StatusCode::NO_CONTENT],
             &format!("DELETE {url}"),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn acquire_sandbox_session(
+        &self,
+        thread_id: &str,
+        mode: SandboxSessionMode,
+    ) -> Result<SandboxSessionAcquireResponse> {
+        let url = format!("{}/v1/sandbox/sessions", self.endpoint);
+        let request = SandboxSessionAcquireRequest {
+            thread_id: thread_id.to_string(),
+            mode,
+        };
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .json(&request)
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "acquire sandbox session").await?;
+        Ok(resp.json::<SandboxSessionAcquireResponse>().await?)
+    }
+
+    pub async fn refresh_sandbox_session(
+        &self,
+        session_id: &str,
+    ) -> Result<SandboxSessionRefreshResponse> {
+        let url = format!(
+            "{}/v1/sandbox/sessions/{}/refresh",
+            self.endpoint, session_id
+        );
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .json(&serde_json::json!({}))
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "refresh sandbox session").await?;
+        Ok(resp.json::<SandboxSessionRefreshResponse>().await?)
+    }
+
+    pub async fn release_sandbox_session(&self, session_id: &str) -> Result<()> {
+        let url = format!("{}/v1/sandbox/sessions/{}", self.endpoint, session_id);
+        let resp = self
+            .http
+            .delete(&url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        Self::check(
+            resp,
+            &[StatusCode::OK, StatusCode::NO_CONTENT],
+            "release sandbox session",
         )
         .await?;
         Ok(())

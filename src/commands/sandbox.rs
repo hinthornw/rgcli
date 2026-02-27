@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, bail};
 use comfy_table::{Cell, Color, Table};
+use serde_json::{Value, json};
 
-use lsandbox::{SandboxClient, RunOpts};
+use lsandbox::{RunOpts, SandboxClient};
+use crate::api::Client;
+use crate::api::types::{SandboxSessionAcquireResponse, SandboxSessionMode};
 
 fn get_api_key() -> Result<String> {
     let cfg = crate::config::load().context("failed to load config")?;
@@ -21,9 +24,220 @@ fn client() -> Result<SandboxClient> {
     SandboxClient::new(&key).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+fn sdk_client() -> Result<Client> {
+    let cfg =
+        crate::config::load().context("failed to load config (run `ailsd` interactively first)")?;
+    Client::new(&cfg).context("failed to create API client")
+}
+
+#[derive(Default, Clone)]
+struct SessionView {
+    thread_id: Option<String>,
+    session_id: Option<String>,
+    sandbox_id: Option<String>,
+    sandbox_provider: Option<String>,
+    http_base_url: Option<String>,
+    ws_base_url: Option<String>,
+    token_expires_at: Option<String>,
+    token_present: bool,
+}
+
+fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut cur = value;
+    for key in path {
+        cur = cur.get(*key)?;
+    }
+    Some(cur)
+}
+
+fn pick_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths
+        .iter()
+        .find_map(|path| get_path(value, path).and_then(Value::as_str).map(str::to_string))
+}
+
+fn has_value(value: &Value, paths: &[&[&str]]) -> bool {
+    paths
+        .iter()
+        .any(|path| get_path(value, path).is_some_and(|v| !v.is_null()))
+}
+
+fn session_view_from_value(value: &Value) -> SessionView {
+    SessionView {
+        thread_id: pick_string(value, &[&["thread_id"], &["scope", "id"]]),
+        session_id: pick_string(value, &[&["session_id"], &["binding", "id"], &["id"]]),
+        sandbox_id: pick_string(
+            value,
+            &[&["sandbox", "id"], &["binding", "sandbox_id"], &["sandbox_id"]],
+        ),
+        sandbox_provider: pick_string(
+            value,
+            &[&["sandbox", "provider"], &["binding", "provider"], &["provider"]],
+        ),
+        http_base_url: pick_string(
+            value,
+            &[
+                &["sandbox", "http_base_url"],
+                &["dataplane", "http_base_url"],
+                &["http_base_url"],
+                &["http_url"],
+            ],
+        ),
+        ws_base_url: pick_string(
+            value,
+            &[
+                &["sandbox", "ws_base_url"],
+                &["dataplane", "ws_base_url"],
+                &["ws_base_url"],
+                &["ws_url"],
+            ],
+        ),
+        token_expires_at: pick_string(
+            value,
+            &[&["expires_at"], &["credentials", "expires_at"]],
+        ),
+        token_present: has_value(
+            value,
+            &[&["token"], &["access_token"], &["credentials", "access_token"]],
+        ),
+    }
+}
+
+fn session_view_from_acquire(resp: &SandboxSessionAcquireResponse) -> SessionView {
+    SessionView {
+        thread_id: Some(resp.thread_id.clone()),
+        session_id: Some(resp.session_id.clone()),
+        sandbox_id: Some(resp.sandbox.id.clone()),
+        sandbox_provider: Some(resp.sandbox.provider.clone()),
+        http_base_url: Some(resp.sandbox.http_base_url.clone()),
+        ws_base_url: Some(resp.sandbox.ws_base_url.clone()),
+        token_expires_at: Some(resp.expires_at.clone()),
+        token_present: !resp.token.is_empty(),
+    }
+}
+
+fn merge_missing(dst: &mut SessionView, src: SessionView) {
+    if dst.thread_id.is_none() {
+        dst.thread_id = src.thread_id;
+    }
+    if dst.session_id.is_none() {
+        dst.session_id = src.session_id;
+    }
+    if dst.sandbox_id.is_none() {
+        dst.sandbox_id = src.sandbox_id;
+    }
+    if dst.sandbox_provider.is_none() {
+        dst.sandbox_provider = src.sandbox_provider;
+    }
+    if dst.http_base_url.is_none() {
+        dst.http_base_url = src.http_base_url;
+    }
+    if dst.ws_base_url.is_none() {
+        dst.ws_base_url = src.ws_base_url;
+    }
+    if dst.token_expires_at.is_none() {
+        dst.token_expires_at = src.token_expires_at;
+    }
+    if !dst.token_present {
+        dst.token_present = src.token_present;
+    }
+}
+
+fn print_session_output(action: &str, view: &SessionView, released: Option<bool>) -> Result<()> {
+    let mut out = json!({
+        "action": action,
+        "thread_id": view.thread_id.clone(),
+        "session_id": view.session_id.clone(),
+        "sandbox": {
+            "id": view.sandbox_id.clone(),
+            "provider": view.sandbox_provider.clone(),
+            "http_base_url": view.http_base_url.clone(),
+            "ws_base_url": view.ws_base_url.clone(),
+        },
+        "token": {
+            "present": view.token_present,
+            "expires_at": view.token_expires_at.clone(),
+        }
+    });
+    if let Some(released) = released {
+        out["released"] = Value::Bool(released);
+    }
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+async fn get_session_by_id(client: &Client, session_id: &str) -> Result<Value> {
+    let url = format!("{}/v1/sandbox/sessions/{}", client.endpoint(), session_id);
+    client.get_json(&url).await
+}
+
+pub async fn session_get(thread_id: &str) -> Result<()> {
+    let client = sdk_client()?;
+    let resp = client
+        .acquire_sandbox_session(thread_id, SandboxSessionMode::Get)
+        .await?;
+    let view = session_view_from_acquire(&resp);
+    print_session_output("session-get", &view, None)
+}
+
+pub async fn session_ensure(thread_id: &str) -> Result<()> {
+    let client = sdk_client()?;
+    let resp = client
+        .acquire_sandbox_session(thread_id, SandboxSessionMode::Ensure)
+        .await?;
+    let view = session_view_from_acquire(&resp);
+    print_session_output("session-ensure", &view, None)
+}
+
+pub async fn session_refresh(session_id: &str) -> Result<()> {
+    let client = sdk_client()?;
+    let resp = client.refresh_sandbox_session(session_id).await?;
+
+    let mut view = SessionView {
+        session_id: Some(session_id.to_string()),
+        token_expires_at: Some(resp.expires_at),
+        token_present: !resp.token.is_empty(),
+        ..Default::default()
+    };
+    if view.session_id.is_none() {
+        view.session_id = Some(session_id.to_string());
+    }
+
+    if view.sandbox_id.is_none()
+        || view.sandbox_provider.is_none()
+        || view.http_base_url.is_none()
+        || view.ws_base_url.is_none()
+        || view.thread_id.is_none()
+    {
+        if let Ok(snapshot) = get_session_by_id(&client, session_id).await {
+            merge_missing(&mut view, session_view_from_value(&snapshot));
+        }
+    }
+
+    print_session_output("session-refresh", &view, None)
+}
+
+pub async fn session_release(session_id: &str) -> Result<()> {
+    let client = sdk_client()?;
+    let mut view = get_session_by_id(&client, session_id)
+        .await
+        .map(|v| session_view_from_value(&v))
+        .unwrap_or_default();
+
+    client.release_sandbox_session(session_id).await?;
+
+    if view.session_id.is_none() {
+        view.session_id = Some(session_id.to_string());
+    }
+    print_session_output("session-release", &view, Some(true))
+}
+
 pub async fn list() -> Result<()> {
     let c = client()?;
-    let sandboxes = c.list_sandboxes().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sandboxes = c
+        .list_sandboxes()
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if sandboxes.is_empty() {
         println!("No sandboxes found.");
@@ -48,7 +262,10 @@ pub async fn list() -> Result<()> {
 
 pub async fn templates() -> Result<()> {
     let c = client()?;
-    let templates = c.list_templates().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let templates = c
+        .list_templates()
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if templates.is_empty() {
         println!("No templates found.");
@@ -86,7 +303,10 @@ pub async fn create(template: &str, name: Option<&str>) -> Result<()> {
 
 pub async fn exec(name: &str, command: &str, timeout: u64) -> Result<()> {
     let c = client()?;
-    let sandbox = c.get_sandbox(name).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sandbox = c
+        .get_sandbox(name)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let result = sandbox
         .run_with(&RunOpts::new(command).timeout(timeout))
         .await
@@ -106,7 +326,10 @@ pub async fn exec(name: &str, command: &str, timeout: u64) -> Result<()> {
 
 pub async fn connect(name: &str) -> Result<()> {
     let c = client()?;
-    let sandbox = c.get_sandbox(name).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sandbox = c
+        .get_sandbox(name)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("Connecting to sandbox '{}'...", sandbox.name());
     let mut handle = sandbox
@@ -148,13 +371,12 @@ pub async fn connect(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn sync(
-    name: &str,
-    local_path: &str,
-    remote_path: &str,
-) -> Result<()> {
+pub async fn sync(name: &str, local_path: &str, remote_path: &str) -> Result<()> {
     let c = client()?;
-    let sandbox = c.get_sandbox(name).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sandbox = c
+        .get_sandbox(name)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("Syncing {} -> sandbox:{}...", local_path, remote_path);
 
@@ -172,7 +394,10 @@ pub async fn sync(
     let cmd = format!(
         "mkdir -p {remote_path} && tar xzf /tmp/_ailsd_sync.tar.gz -C {remote_path} && rm /tmp/_ailsd_sync.tar.gz"
     );
-    let result = sandbox.run(&cmd).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = sandbox
+        .run(&cmd)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if result.success() {
         println!(
@@ -187,7 +412,9 @@ pub async fn sync(
 
 pub async fn delete(name: &str) -> Result<()> {
     let c = client()?;
-    c.delete_sandbox(name).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    c.delete_sandbox(name)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("Deleted sandbox: {name}");
     Ok(())
 }

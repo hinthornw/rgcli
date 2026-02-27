@@ -42,6 +42,42 @@ pub struct RunRequest {
     pub feedback_keys: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxSessionMode {
+    Get,
+    Ensure,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxSessionAcquireRequest {
+    pub thread_id: String,
+    pub mode: SandboxSessionMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxSessionInfo {
+    pub id: String,
+    pub provider: String,
+    pub http_base_url: String,
+    pub ws_base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxSessionAcquireResponse {
+    pub session_id: String,
+    pub thread_id: String,
+    pub sandbox: SandboxSessionInfo,
+    pub token: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxSessionRefreshResponse {
+    pub token: String,
+    pub expires_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Thread {
     pub thread_id: String,
@@ -829,6 +865,63 @@ mod tests {
         let request = new_resume_request("assistant-123", Some(input.clone()), None);
 
         assert_eq!(request.input, input);
+    }
+
+    #[test]
+    fn sandbox_session_acquire_request_serializes_expected_shape() {
+        let request = SandboxSessionAcquireRequest {
+            thread_id: "thr_123".to_string(),
+            mode: SandboxSessionMode::Ensure,
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "thread_id": "thr_123",
+                "mode": "ensure"
+            })
+        );
+    }
+
+    #[test]
+    fn sandbox_session_mode_deserializes_from_lowercase_value() {
+        let request: SandboxSessionAcquireRequest = serde_json::from_value(serde_json::json!({
+            "thread_id": "thr_123",
+            "mode": "get"
+        }))
+        .unwrap();
+        assert_eq!(request.mode, SandboxSessionMode::Get);
+    }
+
+    #[test]
+    fn sandbox_session_acquire_response_deserializes_expected_shape() {
+        let response: SandboxSessionAcquireResponse = serde_json::from_value(serde_json::json!({
+            "session_id": "ssn_123",
+            "thread_id": "thr_123",
+            "sandbox": {
+                "id": "sb_123",
+                "provider": "langsmith",
+                "http_base_url": "https://dp.example.com/v1",
+                "ws_base_url": "wss://dp.example.com/v1"
+            },
+            "token": "opaque_or_jwt_token",
+            "expires_at": "2026-02-27T20:20:00Z"
+        }))
+        .unwrap();
+        assert_eq!(response.session_id, "ssn_123");
+        assert_eq!(response.sandbox.provider, "langsmith");
+        assert_eq!(response.expires_at, "2026-02-27T20:20:00Z");
+    }
+
+    #[test]
+    fn sandbox_session_refresh_response_deserializes_expected_shape() {
+        let response: SandboxSessionRefreshResponse = serde_json::from_value(serde_json::json!({
+            "token": "new_token",
+            "expires_at": "2026-02-27T20:50:00Z"
+        }))
+        .unwrap();
+        assert_eq!(response.token, "new_token");
+        assert_eq!(response.expires_at, "2026-02-27T20:50:00Z");
     }
 
     #[test]

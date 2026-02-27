@@ -3,7 +3,7 @@ pub mod bench;
 pub mod crons;
 pub mod deployment;
 pub mod runs;
+pub mod sandbox;
 pub mod store;
 pub mod threads;
-pub mod sandbox;
 pub mod uninstall;

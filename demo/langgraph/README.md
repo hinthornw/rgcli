@@ -5,9 +5,10 @@
 ```bash
 cd demo/langgraph
 uv sync
+uv pip install --editable ../../crates/langsmith-sandbox-py
 ```
 
-`uv sync` builds and installs the local Rust PyO3 extension `lsandbox-py` from `../../crates/langsmith-sandbox-py`.
+The second command installs the local Rust PyO3 extension `lsandbox-py`.
 
 ## Env
 
@@ -20,7 +21,8 @@ export SSAP_CLIENT_BEARER_TOKENS="dev-client"
 ## Run
 
 ```bash
-uv run langgraph dev --config ./langgraph-ssap-mvp.json --no-browser
+cd ../..
+uv run --project demo/langgraph langgraph dev --config ./langgraph.json --no-browser
 ```
 
 ## Notes
@@ -29,7 +31,7 @@ uv run langgraph dev --config ./langgraph-ssap-mvp.json --no-browser
 - `LANGSMITH_API_KEY` must be set for session creation and relay mode endpoints.
 - `LANGSMITH_SANDBOX_TEMPLATE` is optional. If unset, the app auto-selects the first available template from `GET /v2/sandboxes/templates`.
 - Sandbox control-plane operations (template list/create/get) are executed through the Rust client via async-native `lsandbox_py` methods.
-- Server auth mode is `noop` in this demo config so relay WebSockets work with current LangGraph middleware behavior.
+- Server auth mode is `noop` in this config so relay WebSockets work with current LangGraph middleware behavior.
 - `./auth.py` is kept in-repo for future re-enable once custom-auth + websocket scope handling is fixed upstream.
 - Set `SSAP_ENABLED=false` to disable SSAP routes.
 

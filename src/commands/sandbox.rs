@@ -2,9 +2,9 @@ use anyhow::{Context, Result, bail};
 use comfy_table::{Cell, Color, Table};
 use serde_json::{Value, json};
 
-use lsandbox::{RunOpts, SandboxClient};
 use crate::api::Client;
 use crate::api::types::{SandboxSessionAcquireResponse, SandboxSessionMode};
+use lsandbox::{RunOpts, SandboxClient};
 
 fn get_api_key() -> Result<String> {
     let cfg = crate::config::load().context("failed to load config")?;
@@ -51,9 +51,11 @@ fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
 }
 
 fn pick_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
-    paths
-        .iter()
-        .find_map(|path| get_path(value, path).and_then(Value::as_str).map(str::to_string))
+    paths.iter().find_map(|path| {
+        get_path(value, path)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
 }
 
 fn has_value(value: &Value, paths: &[&[&str]]) -> bool {
@@ -68,11 +70,19 @@ fn session_view_from_value(value: &Value) -> SessionView {
         session_id: pick_string(value, &[&["session_id"], &["binding", "id"], &["id"]]),
         sandbox_id: pick_string(
             value,
-            &[&["sandbox", "id"], &["binding", "sandbox_id"], &["sandbox_id"]],
+            &[
+                &["sandbox", "id"],
+                &["binding", "sandbox_id"],
+                &["sandbox_id"],
+            ],
         ),
         sandbox_provider: pick_string(
             value,
-            &[&["sandbox", "provider"], &["binding", "provider"], &["provider"]],
+            &[
+                &["sandbox", "provider"],
+                &["binding", "provider"],
+                &["provider"],
+            ],
         ),
         http_base_url: pick_string(
             value,
@@ -92,13 +102,14 @@ fn session_view_from_value(value: &Value) -> SessionView {
                 &["ws_url"],
             ],
         ),
-        token_expires_at: pick_string(
-            value,
-            &[&["expires_at"], &["credentials", "expires_at"]],
-        ),
+        token_expires_at: pick_string(value, &[&["expires_at"], &["credentials", "expires_at"]]),
         token_present: has_value(
             value,
-            &[&["token"], &["access_token"], &["credentials", "access_token"]],
+            &[
+                &["token"],
+                &["access_token"],
+                &["credentials", "access_token"],
+            ],
         ),
     }
 }

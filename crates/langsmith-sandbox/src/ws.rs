@@ -191,12 +191,13 @@ impl WsConnection {
                     // Skip unrecognized messages
                 }
                 Some(Ok(Message::Close(frame))) => {
-                    if let Some(ref f) = frame {
-                        if f.code == tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away {
-                            return Err(SandboxError::ServerReload(
-                                "Server is reloading, reconnect to resume".to_string(),
-                            ));
-                        }
+                    if frame.as_ref().is_some_and(|f| {
+                        f.code
+                            == tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away
+                    }) {
+                        return Err(SandboxError::ServerReload(
+                            "Server is reloading, reconnect to resume".to_string(),
+                        ));
                     }
                     return Ok(None);
                 }

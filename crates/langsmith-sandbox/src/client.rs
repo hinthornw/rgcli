@@ -47,10 +47,9 @@ impl SandboxClient {
         })
     }
 
-    /// Build an HTTP client for dataplane operations (includes API key auth).
-    fn dataplane_http(&self) -> reqwest::Client {
+    fn dataplane_http_for(api_key: &str) -> reqwest::Client {
         let mut headers = HeaderMap::new();
-        if let Ok(val) = HeaderValue::from_str(&self.api_key) {
+        if let Ok(val) = HeaderValue::from_str(api_key) {
             headers.insert("X-Api-Key", val);
         }
         reqwest::Client::builder()
@@ -58,6 +57,36 @@ impl SandboxClient {
             .user_agent("ailsd-sandbox")
             .build()
             .unwrap_or_default()
+    }
+
+    /// Build an HTTP client for dataplane operations (includes API key auth).
+    fn dataplane_http(&self) -> reqwest::Client {
+        Self::dataplane_http_for(&self.api_key)
+    }
+
+    /// Construct a sandbox handle for a known dataplane URL and auth token.
+    ///
+    /// This is useful for server-issued relay sessions where the dataplane URL
+    /// and token come from a separate control plane.
+    pub fn sandbox_from_dataplane(
+        &self,
+        name: &str,
+        dataplane_url: &str,
+        auth_token: &str,
+    ) -> Sandbox {
+        let info = SandboxInfo {
+            name: name.to_string(),
+            template_name: "relay".to_string(),
+            dataplane_url: Some(dataplane_url.trim_end_matches('/').to_string()),
+            id: None,
+            created_at: None,
+            updated_at: None,
+        };
+        Sandbox::new(
+            info,
+            Self::dataplane_http_for(auth_token),
+            auth_token.to_string(),
+        )
     }
 
     // ── Helpers ──

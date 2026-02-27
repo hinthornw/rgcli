@@ -42,7 +42,48 @@ impl SandboxTerminal {
             .get_sandbox(sandbox_name)
             .await
             .map_err(|e| format!("Get sandbox: {e}"))?;
+        Self::connect_from_sandbox(sandbox, sandbox_name).await
+    }
 
+    /// Create a new terminal pane connected to a server-issued sandbox session.
+    pub async fn connect_session(session_id: &str) -> Result<Self, String> {
+        let cfg = crate::config::load().map_err(|e| format!("Config error: {e}"))?;
+        let api = crate::api::Client::new(&cfg).map_err(|e| format!("API client error: {e}"))?;
+        let refreshed = api
+            .refresh_sandbox_session(session_id)
+            .await
+            .map_err(|e| format!("Refresh session: {e}"))?;
+        let session = api
+            .get_sandbox_session(session_id)
+            .await
+            .map_err(|e| format!("Get session: {e}"))?;
+
+        let token = if refreshed.token.is_empty() {
+            session.token.clone()
+        } else {
+            refreshed.token
+        };
+        if token.is_empty() {
+            return Err("Session token missing after refresh".to_string());
+        }
+
+        let cfg_key = if cfg.api_key.is_empty() {
+            std::env::var("LANGSMITH_API_KEY").unwrap_or_default()
+        } else {
+            cfg.api_key.clone()
+        };
+        if cfg_key.is_empty() {
+            return Err("No API key configured.".to_string());
+        }
+
+        let client = lsandbox::SandboxClient::new(&cfg_key)
+            .map_err(|e| format!("Sandbox client error: {e}"))?;
+        let label = format!("session-{session_id}");
+        let sandbox = client.sandbox_from_dataplane(&label, &session.sandbox.http_base_url, &token);
+        Self::connect_from_sandbox(sandbox, &label).await
+    }
+
+    async fn connect_from_sandbox(sandbox: lsandbox::Sandbox, label: &str) -> Result<Self, String> {
         let mut handle = sandbox
             .run_streaming("/bin/bash")
             .await
@@ -62,8 +103,8 @@ impl SandboxTerminal {
         });
 
         Ok(Self {
-            sandbox_name: sandbox_name.to_string(),
-            output: vec![format!("Connected to sandbox '{sandbox_name}'")],
+            sandbox_name: label.to_string(),
+            output: vec![format!("Connected to sandbox '{label}'")],
             input: String::new(),
             cursor: 0,
             input_sender: Some(input_sender),

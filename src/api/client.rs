@@ -219,6 +219,45 @@ impl Client {
         Ok(())
     }
 
+    pub async fn get_sandbox_session(
+        &self,
+        session_id: &str,
+    ) -> Result<SandboxSessionAcquireResponse> {
+        let url = format!("{}/v1/sandbox/sessions/{}", self.endpoint, session_id);
+        let resp = self
+            .http
+            .get(&url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "get sandbox session").await?;
+        Ok(resp.json::<SandboxSessionAcquireResponse>().await?)
+    }
+
+    pub async fn relay_execute_sandbox_session(
+        &self,
+        http_base_url: &str,
+        token: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<Value> {
+        let url = format!("{}/execute", http_base_url.trim_end_matches('/'));
+        let payload = serde_json::json!({
+            "command": command,
+            "timeout_secs": timeout_secs,
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .headers(self.headers.clone())
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await?;
+        let resp = Self::check(resp, &[StatusCode::OK], "relay sandbox execute").await?;
+        Ok(resp.json::<Value>().await?)
+    }
+
     pub async fn create_thread(&self) -> Result<Thread> {
         let url = format!("{}/threads", self.endpoint);
         let resp = self

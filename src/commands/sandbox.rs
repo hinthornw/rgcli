@@ -178,8 +178,25 @@ fn print_session_output(action: &str, view: &SessionView, released: Option<bool>
 }
 
 async fn get_session_by_id(client: &Client, session_id: &str) -> Result<Value> {
-    let url = format!("{}/v1/sandbox/sessions/{}", client.endpoint(), session_id);
-    client.get_json(&url).await
+    let response = client.get_sandbox_session(session_id).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn resolve_session_for_relay(
+    client: &Client,
+    session_id: &str,
+) -> Result<(SandboxSessionAcquireResponse, String)> {
+    let refreshed = client.refresh_sandbox_session(session_id).await?;
+    let session = client.get_sandbox_session(session_id).await?;
+    let token = if refreshed.token.is_empty() {
+        session.token.clone()
+    } else {
+        refreshed.token
+    };
+    if token.is_empty() {
+        bail!("session refresh did not return a relay token");
+    }
+    Ok((session, token))
 }
 
 pub async fn session_get(thread_id: &str) -> Result<()> {
@@ -241,6 +258,35 @@ pub async fn session_release(session_id: &str) -> Result<()> {
         view.session_id = Some(session_id.to_string());
     }
     print_session_output("session-release", &view, Some(true))
+}
+
+pub async fn session_exec(session_id: &str, command: &str, timeout: u64) -> Result<()> {
+    let client = sdk_client()?;
+    let (session, token) = resolve_session_for_relay(&client, session_id).await?;
+    let result = client
+        .relay_execute_sandbox_session(&session.sandbox.http_base_url, &token, command, timeout)
+        .await?;
+
+    let stdout = result
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let stderr = result
+        .get("stderr")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let exit_code = result.get("exit_code").and_then(Value::as_i64).unwrap_or(0);
+
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
+    if exit_code != 0 {
+        std::process::exit(exit_code as i32);
+    }
+    Ok(())
 }
 
 pub async fn list() -> Result<()> {
@@ -342,44 +388,28 @@ pub async fn connect(name: &str) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("Connecting to sandbox '{}'...", sandbox.name());
-    let mut handle = sandbox
-        .run_streaming("/bin/bash")
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    connect_streaming_shell(sandbox, &format!("sandbox '{}'", name)).await
+}
 
-    // Interactive terminal: read stdin in a separate task, forward to sandbox
-    let input = handle.input_sender();
-    let stdin_task = tokio::spawn(async move {
-        use tokio::io::AsyncBufReadExt;
-        let stdin = tokio::io::stdin();
-        let reader = tokio::io::BufReader::new(stdin);
-        let mut lines = reader.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if input.send(&format!("{line}\n")).await.is_err() {
-                break;
-            }
-        }
-    });
+pub async fn session_connect(session_id: &str) -> Result<()> {
+    let sdk = sdk_client()?;
+    let (session, token) = resolve_session_for_relay(&sdk, session_id).await?;
 
-    // Print output chunks as they arrive
-    while let Some(chunk) = handle.recv().await {
-        print!("{}", chunk.data);
-    }
+    let c = client()?;
+    let sandbox = c.sandbox_from_dataplane(
+        &format!("session-{session_id}"),
+        &session.sandbox.http_base_url,
+        &token,
+    );
 
-    stdin_task.abort();
-
-    match handle.wait().await {
-        Ok(result) => {
-            if !result.success() {
-                std::process::exit(result.exit_code);
-            }
-        }
-        Err(e) => {
-            eprintln!("Connection closed: {e}");
-        }
-    }
-    Ok(())
+    connect_streaming_shell(
+        sandbox,
+        &format!(
+            "session '{}' (sandbox '{}')",
+            session_id, session.sandbox.id
+        ),
+    )
+    .await
 }
 
 pub async fn sync(name: &str, local_path: &str, remote_path: &str) -> Result<()> {
@@ -489,6 +519,47 @@ fn walk_dir(
             walk_dir(root, &path, tar)?;
         } else {
             tar.append_path_with_name(&path, &name)?;
+        }
+    }
+    Ok(())
+}
+
+async fn connect_streaming_shell(sandbox: lsandbox::Sandbox, label: &str) -> Result<()> {
+    println!("Connecting to {label}...");
+    let mut handle = sandbox
+        .run_streaming("/bin/bash")
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    // Interactive terminal: read stdin in a separate task, forward to sandbox
+    let input = handle.input_sender();
+    let stdin_task = tokio::spawn(async move {
+        use tokio::io::AsyncBufReadExt;
+        let stdin = tokio::io::stdin();
+        let reader = tokio::io::BufReader::new(stdin);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if input.send(&format!("{line}\n")).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Print output chunks as they arrive
+    while let Some(chunk) = handle.recv().await {
+        print!("{}", chunk.data);
+    }
+
+    stdin_task.abort();
+
+    match handle.wait().await {
+        Ok(result) => {
+            if !result.success() {
+                std::process::exit(result.exit_code);
+            }
+        }
+        Err(e) => {
+            eprintln!("Connection closed: {e}");
         }
     }
     Ok(())

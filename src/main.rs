@@ -434,6 +434,23 @@ enum SandboxAction {
         #[arg(long, value_name = "SESSION_ID")]
         session: String,
     },
+    /// Execute a command through a sandbox session relay
+    SessionExec {
+        /// Session ID
+        #[arg(long, value_name = "SESSION_ID")]
+        session: String,
+        /// Command to run
+        command: String,
+        /// Timeout in seconds
+        #[arg(long, default_value = "60")]
+        timeout: u64,
+    },
+    /// Open an interactive terminal via a sandbox session relay
+    SessionConnect {
+        /// Session ID
+        #[arg(long, value_name = "SESSION_ID")]
+        session: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -993,6 +1010,14 @@ async fn main() -> Result<()> {
                 }
                 SandboxAction::SessionRelease { session } => {
                     commands::sandbox::session_release(&session).await
+                }
+                SandboxAction::SessionExec {
+                    session,
+                    command,
+                    timeout,
+                } => commands::sandbox::session_exec(&session, &command, timeout).await,
+                SandboxAction::SessionConnect { session } => {
+                    commands::sandbox::session_connect(&session).await
                 }
             };
             if let Err(err) = result {

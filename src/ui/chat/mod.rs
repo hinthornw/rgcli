@@ -14,7 +14,7 @@ use ratatui::text::Line;
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
-use crate::api::types::Attachment;
+use crate::api::types::{Attachment, SandboxSessionMode};
 use crate::api::{Client, StreamEvent};
 use crate::ui::mascot::{Parrot, ParrotState};
 
@@ -198,6 +198,8 @@ pub struct ChatState {
     >,
     pub(crate) sandbox_connect_rx:
         Option<mpsc::UnboundedReceiver<Result<sandbox_pane::SandboxTerminal, String>>>,
+    pub(crate) shared_sandbox_session_id: Option<String>,
+    pub(crate) shared_sandbox_id: Option<String>,
 }
 
 impl ChatState {
@@ -255,6 +257,8 @@ impl ChatState {
             sandbox_rx: None,
             sandbox_template_rx: None,
             sandbox_connect_rx: None,
+            shared_sandbox_session_id: None,
+            shared_sandbox_id: None,
         }
     }
 
@@ -757,6 +761,22 @@ pub async fn run_chat_loop(
     app.available_assistants = chat_config.available_assistants.clone();
     app.tenant_id = chat_config.tenant_id.clone();
     app.project_id = chat_config.project_id.clone();
+    if let Ok(binding) = client
+        .acquire_sandbox_session(thread_id, SandboxSessionMode::Ensure)
+        .await
+    {
+        app.shared_sandbox_session_id = Some(binding.session_id.clone());
+        app.shared_sandbox_id = Some(binding.sandbox.id.clone());
+        app.messages.push(ChatMessage::System(format!(
+            "Shared sandbox ready: session={} sandbox={}",
+            binding.session_id, binding.sandbox.id
+        )));
+    } else {
+        crate::debug_log::log(
+            "chat",
+            "shared sandbox session not available on this server/context",
+        );
+    }
 
     // Fetch deployment info
     let deploy_info = match client.get_info().await {
@@ -834,6 +854,13 @@ pub async fn run_chat_loop(
     ];
     if let Some(info) = &deploy_info {
         app.header_info.push(info.clone());
+    }
+    if let Some(session_id) = &app.shared_sandbox_session_id {
+        let mut line = format!("sandbox session: {session_id}");
+        if let Some(sandbox_id) = &app.shared_sandbox_id {
+            line.push_str(&format!(" ({sandbox_id})"));
+        }
+        app.header_info.push(line);
     }
     app.header_info
         .push(format!("tip: {}", helpers::random_tip()));

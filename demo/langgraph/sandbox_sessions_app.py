@@ -9,21 +9,25 @@ Security model for LangSmith sandbox:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Any, Mapping, TypedDict
 from uuid import uuid4
 
 import httpx
 import jwt
+import websockets
+from langgraph_api.cache import cache_get, cache_set
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 try:
     from lsandbox_py import SandboxClient as RustSandboxClient
@@ -86,6 +90,10 @@ def _jwt_issuer() -> str:
 
 def _provider() -> str:
     return os.getenv("SSAP_PROVIDER", "langsmith")
+
+
+def _cache_prefix() -> str:
+    return os.getenv("SSAP_CACHE_PREFIX", "ssap:mvp")
 
 
 def _caps() -> list[str]:
@@ -240,9 +248,117 @@ def _refresh_response(token: str, token_expires_at: datetime) -> dict[str, str]:
     }
 
 
+def _parse_iso(value: str) -> datetime:
+    if value.endswith("Z"):
+        value = f"{value[:-1]}+00:00"
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _ttl_until(expires_at: datetime) -> timedelta:
+    seconds = int((expires_at - _now()).total_seconds())
+    return timedelta(seconds=max(1, seconds))
+
+
+def _binding_key(principal_id: str, thread_id: str) -> str:
+    digest = hashlib.sha256(f"{principal_id}:{thread_id}".encode("utf-8")).hexdigest()
+    return f"{_cache_prefix()}:binding:{digest}"
+
+
+def _session_key(session_id: str) -> str:
+    return f"{_cache_prefix()}:session:{session_id}"
+
+
+def _record_to_payload(record: SessionRecord) -> dict[str, Any]:
+    return {
+        **record,
+        "created_at": _iso(record["created_at"]),
+        "session_expires_at": _iso(record["session_expires_at"]),
+    }
+
+
+def _record_from_payload(payload: Any) -> SessionRecord | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        session_id = payload["session_id"]
+        thread_id = payload["thread_id"]
+        principal_id = payload["principal_id"]
+        sandbox_name = payload["sandbox_name"]
+        provider = payload["provider"]
+        dataplane_url = payload["dataplane_url"]
+        created_at = payload["created_at"]
+        session_expires_at = payload["session_expires_at"]
+    except KeyError:
+        return None
+
+    if not all(
+        isinstance(item, str)
+        for item in (
+            session_id,
+            thread_id,
+            principal_id,
+            sandbox_name,
+            provider,
+            dataplane_url,
+            created_at,
+            session_expires_at,
+        )
+    ):
+        return None
+
+    return {
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "principal_id": principal_id,
+        "sandbox_name": sandbox_name,
+        "provider": provider,
+        "dataplane_url": dataplane_url,
+        "created_at": _parse_iso(created_at),
+        "session_expires_at": _parse_iso(session_expires_at),
+    }
+
+
+async def _load_session(session_id: str) -> SessionRecord | None:
+    payload = await cache_get(_session_key(session_id))
+    return _record_from_payload(payload)
+
+
+async def _save_session(record: SessionRecord) -> None:
+    await cache_set(
+        _session_key(record["session_id"]),
+        _record_to_payload(record),
+        ttl=_ttl_until(record["session_expires_at"]),
+    )
+
+
+async def _load_bound_session_id(principal_id: str, thread_id: str) -> str | None:
+    payload = await cache_get(_binding_key(principal_id, thread_id))
+    if not isinstance(payload, dict):
+        return None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    return session_id
+
+
+async def _save_binding(principal_id: str, thread_id: str, session_id: str, expires_at: datetime) -> None:
+    await cache_set(
+        _binding_key(principal_id, thread_id),
+        {"session_id": session_id},
+        ttl=_ttl_until(expires_at),
+    )
+
+
+async def _clear_binding_and_session(record: SessionRecord) -> None:
+    ttl = timedelta(seconds=1)
+    await cache_set(_session_key(record["session_id"]), None, ttl=ttl)
+    await cache_set(_binding_key(record["principal_id"], record["thread_id"]), None, ttl=ttl)
+
+
 _lock = asyncio.Lock()
-_thread_to_session: dict[str, str] = {}
-_sessions: dict[str, SessionRecord] = {}
 
 
 def _require_enabled() -> None:
@@ -252,17 +368,15 @@ def _require_enabled() -> None:
 
 def _principal_id_from_request(request: Request) -> str:
     user = request.scope.get("user")
+    identity = None
     if user is not None:
         identity = getattr(user, "identity", None) or getattr(user, "id", None)
-        if identity:
-            return f"user:{identity}"
-
-    auth = request.headers.get("authorization", "")
-    if auth:
-        digest = hashlib.sha256(auth.encode("utf-8")).hexdigest()[:16]
-        return f"auth:{digest}"
-
-    return "anon:dev"
+    if not isinstance(identity, str) or not identity.strip():
+        # LangGraph noop auth mode does not provide a user identity.
+        # Use a stable fallback principal so agent and client still bind
+        # to the same shared session in local dev.
+        return "client:anonymous"
+    return identity.strip()
 
 
 def _issue_access_token(record: SessionRecord) -> tuple[str, datetime]:
@@ -290,6 +404,16 @@ def _decode_bearer_token(auth_header: str | None) -> str:
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise _error(401, "UNAUTHENTICATED", "Expected Bearer token")
     return parts[1].strip()
+
+
+def _decode_access_token(headers: Mapping[str, str]) -> str:
+    auth_header = headers.get("authorization")
+    if auth_header:
+        return _decode_bearer_token(auth_header)
+    api_key = headers.get("x-api-key")
+    if isinstance(api_key, str) and api_key.strip():
+        return api_key.strip()
+    raise _error(401, "UNAUTHENTICATED", "Missing access token")
 
 
 def _claims_from_token(token: str) -> dict:
@@ -382,37 +506,48 @@ async def _require_session_for_principal(
     session_id: str,
     required_cap: str | None = None,
 ) -> SessionRecord:
-    token = _decode_bearer_token(request.headers.get("authorization"))
+    token = _decode_access_token(request.headers)
+    return await _require_session_for_token(token, session_id, required_cap)
+
+
+async def _require_session_for_token(
+    token: str,
+    session_id: str,
+    required_cap: str | None = None,
+) -> SessionRecord:
     claims = _claims_from_token(token)
     if claims.get("sid") != session_id:
         raise _error(403, "FORBIDDEN", "Token session mismatch")
     if required_cap is not None:
         _require_capability(claims, required_cap)
 
+    record = await _load_session(session_id)
+    if record is None:
+        raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
+    if claims.get("sub") != record["principal_id"]:
+        raise _error(403, "FORBIDDEN", "Token principal mismatch")
+    if _now() > record["session_expires_at"]:
+        raise _error(410, "SESSION_EXPIRED", "Session exceeded max lifetime")
+    return record
+
+
+def _dataplane_ws_execute_url(dataplane_url: str) -> str:
+    ws_base = dataplane_url.replace("https://", "wss://").replace("http://", "ws://")
+    return f"{ws_base.rstrip('/')}/execute/ws"
+
+
+async def ensure_session_record(
+    principal_id: str,
+    thread_id: str,
+    mode: SandboxSessionMode,
+    sandbox_hint: str | None = None,
+) -> SessionRecord:
     async with _lock:
-        record = _sessions.get(session_id)
-        if record is None:
-            raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
-        if claims.get("sub") != record["principal_id"]:
-            raise _error(403, "FORBIDDEN", "Token principal mismatch")
-        if _now() > record["session_expires_at"]:
-            raise _error(410, "SESSION_EXPIRED", "Session exceeded max lifetime")
-        return record
-
-
-async def acquire_sandbox_session(req: Request) -> JSONResponse:
-    _require_enabled()
-    thread_id, mode, sandbox_hint = _parse_acquire_request(await req.json())
-    principal_id = _principal_id_from_request(req)
-
-    async with _lock:
-        scope_key = f"{principal_id}:{thread_id}"
-        existing_session_id = _thread_to_session.get(scope_key)
+        existing_session_id = await _load_bound_session_id(principal_id, thread_id)
         if existing_session_id is not None:
-            existing = _sessions.get(existing_session_id)
-            if existing is not None:
-                token, token_exp = _issue_access_token(existing)
-                return JSONResponse(_acquire_response(existing, req, token, token_exp))
+            existing = await _load_session(existing_session_id)
+            if existing is not None and _now() <= existing["session_expires_at"]:
+                return existing
         if mode is SandboxSessionMode.get:
             raise _error(
                 404,
@@ -435,12 +570,30 @@ async def acquire_sandbox_session(req: Request) -> JSONResponse:
         "created_at": _now(),
         "session_expires_at": _now() + timedelta(hours=_session_max_hours()),
     }
-    token, token_exp = _issue_access_token(record)
 
     async with _lock:
-        scope_key = f"{principal_id}:{record['thread_id']}"
-        _sessions[record["session_id"]] = record
-        _thread_to_session[scope_key] = record["session_id"]
+        await _save_session(record)
+        await _save_binding(principal_id, thread_id, record["session_id"], record["session_expires_at"])
+    return record
+
+
+async def get_owned_session_record(principal_id: str, session_id: str) -> SessionRecord:
+    record = await _load_session(session_id)
+    if record is None:
+        raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
+    if record["principal_id"] != principal_id:
+        raise _error(403, "FORBIDDEN", "Session principal mismatch")
+    if _now() > record["session_expires_at"]:
+        raise _error(410, "SESSION_EXPIRED", "Session exceeded max lifetime")
+    return record
+
+
+async def acquire_sandbox_session(req: Request) -> JSONResponse:
+    _require_enabled()
+    thread_id, mode, sandbox_hint = _parse_acquire_request(await req.json())
+    principal_id = _principal_id_from_request(req)
+    record = await ensure_session_record(principal_id, thread_id, mode, sandbox_hint)
+    token, token_exp = _issue_access_token(record)
     return JSONResponse(_acquire_response(record, req, token, token_exp))
 
 
@@ -448,14 +601,7 @@ async def get_sandbox_session(req: Request) -> JSONResponse:
     _require_enabled()
     session_id = req.path_params["session_id"]
     principal_id = _principal_id_from_request(req)
-    async with _lock:
-        record = _sessions.get(session_id)
-        if record is None:
-            raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
-        if record["principal_id"] != principal_id:
-            raise _error(403, "FORBIDDEN", "Session principal mismatch")
-        if _now() > record["session_expires_at"]:
-            raise _error(410, "SESSION_EXPIRED", "Session exceeded max lifetime")
+    record = await get_owned_session_record(principal_id, session_id)
     token, token_exp = _issue_access_token(record)
     return JSONResponse(_acquire_response(record, req, token, token_exp))
 
@@ -464,15 +610,10 @@ async def refresh_sandbox_session(req: Request) -> JSONResponse:
     _require_enabled()
     session_id = req.path_params["session_id"]
     principal_id = _principal_id_from_request(req)
-    async with _lock:
-        record = _sessions.get(session_id)
-        if record is None:
-            raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
-        if record["principal_id"] != principal_id:
-            raise _error(403, "FORBIDDEN", "Session principal mismatch")
-        if _now() > record["session_expires_at"]:
-            raise _error(410, "SESSION_EXPIRED", "Session exceeded max lifetime")
+    record = await get_owned_session_record(principal_id, session_id)
     token, token_exp = _issue_access_token(record)
+    await _save_session(record)
+    await _save_binding(principal_id, record["thread_id"], session_id, record["session_expires_at"])
     return JSONResponse(_refresh_response(token, token_exp))
 
 
@@ -480,16 +621,8 @@ async def release_sandbox_session(req: Request) -> Response:
     _require_enabled()
     session_id = req.path_params["session_id"]
     principal_id = _principal_id_from_request(req)
-    async with _lock:
-        record = _sessions.get(session_id)
-        if record is None:
-            raise _error(404, "SESSION_NOT_FOUND", f"Session '{session_id}' does not exist")
-        if record["principal_id"] != principal_id:
-            raise _error(403, "FORBIDDEN", "Session principal mismatch")
-        del _sessions[session_id]
-        scope_key = f"{principal_id}:{record['thread_id']}"
-        if _thread_to_session.get(scope_key) == session_id:
-            del _thread_to_session[scope_key]
+    record = await get_owned_session_record(principal_id, session_id)
+    await _clear_binding_and_session(record)
     return Response(status_code=204)
 
 
@@ -556,6 +689,89 @@ async def relay_download(req: Request) -> StreamingResponse:
     )
 
 
+async def relay_execute_ws(websocket: WebSocket) -> None:
+    _require_enabled()
+    session_id = websocket.path_params["session_id"]
+    await websocket.accept()
+
+    try:
+        token = _decode_access_token(websocket.headers)
+        record = await _require_session_for_token(token, session_id, required_cap="execute")
+    except HTTPException as exc:
+        payload = exc.detail if isinstance(exc.detail, dict) else {"error": {"message": str(exc.detail)}}
+        with contextlib.suppress(Exception):
+            await websocket.send_json(payload)
+            await websocket.close(code=4401)
+        return
+
+    upstream_url = _dataplane_ws_execute_url(record["dataplane_url"])
+    upstream_headers = {"X-Api-Key": _langsmith_api_key()}
+
+    async def _client_to_upstream(upstream: Any) -> None:
+        try:
+            while True:
+                message = await websocket.receive()
+                msg_type = message.get("type")
+                if msg_type == "websocket.disconnect":
+                    with contextlib.suppress(Exception):
+                        await upstream.close()
+                    return
+                if msg_type != "websocket.receive":
+                    continue
+                text = message.get("text")
+                data = message.get("bytes")
+                if text is not None:
+                    await upstream.send(text)
+                elif data is not None:
+                    await upstream.send(data)
+        except WebSocketDisconnect:
+            with contextlib.suppress(Exception):
+                await upstream.close()
+
+    async def _upstream_to_client(upstream: Any) -> None:
+        async for message in upstream:
+            if isinstance(message, str):
+                await websocket.send_text(message)
+            else:
+                await websocket.send_bytes(message)
+
+    try:
+        try:
+            upstream_ctx = websockets.connect(
+                upstream_url,
+                additional_headers=upstream_headers,
+                max_size=None,
+            )
+        except TypeError:
+            upstream_ctx = websockets.connect(
+                upstream_url,
+                extra_headers=upstream_headers,
+                max_size=None,
+            )
+
+        async with upstream_ctx as upstream:
+            tasks = [
+                asyncio.create_task(_client_to_upstream(upstream)),
+                asyncio.create_task(_upstream_to_client(upstream)),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*done, *pending, return_exceptions=True)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error_type": "RelayError",
+                    "error": f"relay websocket failed: {exc}",
+                }
+            )
+    finally:
+        with contextlib.suppress(Exception):
+            await websocket.close()
+
+
 routes = [
     Route("/v1/sandbox/sessions", acquire_sandbox_session, methods=["POST"]),
     Route("/v1/sandbox/sessions/{session_id}", get_sandbox_session, methods=["GET"]),
@@ -564,6 +780,7 @@ routes = [
     Route("/v1/sandbox/relay/{session_id}/execute", relay_execute, methods=["POST"]),
     Route("/v1/sandbox/relay/{session_id}/upload", relay_upload, methods=["POST"]),
     Route("/v1/sandbox/relay/{session_id}/download", relay_download, methods=["GET"]),
+    WebSocketRoute("/v1/sandbox/relay/{session_id}/execute/ws", relay_execute_ws),
 ]
 
 

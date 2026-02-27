@@ -3,7 +3,7 @@ members = [".", "crates/langsmith-sandbox", "crates/langsmith-sandbox-py"]
 
 [package]
 name = "ailsd"
-version = "0.2.37"
+version = "0.2.38"
 edition = "2024"
 
 [dependencies]

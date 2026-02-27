@@ -7,7 +7,7 @@ mod ws;
 
 pub use client::SandboxClient;
 pub use error::SandboxError;
-pub use handle::CommandHandle;
+pub use handle::{CommandHandle, InputSender};
 pub use models::{
     CreateTemplate, ExecutionResult, OutputChunk, Pool, ResourceSpec, RunOpts, SandboxInfo,
     SandboxTemplate, Volume, VolumeMountSpec,

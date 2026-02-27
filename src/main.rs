@@ -350,6 +350,66 @@ enum Command {
         #[arg(long)]
         image: Option<String>,
     },
+
+    /// Manage sandboxes (remote dev environments)
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
+  ailsd sandbox list
+  ailsd sandbox create --template python
+  ailsd sandbox exec my-sb \"echo hello\"
+  ailsd sandbox connect my-sb
+  ailsd sandbox sync my-sb --path . --remote-path /home/user/project")]
+    Sandbox {
+        #[command(subcommand)]
+        action: SandboxAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SandboxAction {
+    /// List sandboxes
+    List,
+    /// List available templates
+    Templates,
+    /// Create a new sandbox
+    Create {
+        /// Template to use
+        #[arg(long)]
+        template: String,
+        /// Sandbox name (auto-generated if omitted)
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Execute a command in a sandbox
+    Exec {
+        /// Sandbox name
+        name: String,
+        /// Command to run
+        command: String,
+        /// Timeout in seconds
+        #[arg(long, default_value = "60")]
+        timeout: u64,
+    },
+    /// Open an interactive terminal in a sandbox
+    Connect {
+        /// Sandbox name
+        name: String,
+    },
+    /// Sync local files to a sandbox
+    Sync {
+        /// Sandbox name
+        name: String,
+        /// Local path to sync
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Remote path in sandbox
+        #[arg(long, default_value = "/home/user")]
+        remote_path: String,
+    },
+    /// Delete a sandbox
+    Delete {
+        /// Sandbox name
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -875,6 +935,32 @@ async fn main() -> Result<()> {
             .await;
             if let Err(err) = result {
                 eprintln!("{}", print_error(&err));
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        Some(Command::Sandbox { action }) => {
+            let result = match action {
+                SandboxAction::List => commands::sandbox::list().await,
+                SandboxAction::Templates => commands::sandbox::templates().await,
+                SandboxAction::Create { template, name } => {
+                    commands::sandbox::create(&template, name.as_deref()).await
+                }
+                SandboxAction::Exec {
+                    name,
+                    command,
+                    timeout,
+                } => commands::sandbox::exec(&name, &command, timeout).await,
+                SandboxAction::Connect { name } => commands::sandbox::connect(&name).await,
+                SandboxAction::Sync {
+                    name,
+                    path,
+                    remote_path,
+                } => commands::sandbox::sync(&name, &path, &remote_path).await,
+                SandboxAction::Delete { name } => commands::sandbox::delete(&name).await,
+            };
+            if let Err(err) = result {
+                eprintln!("{}", print_error(&err.to_string()));
                 std::process::exit(1);
             }
             return Ok(());

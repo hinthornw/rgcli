@@ -5,4 +5,5 @@ pub mod deployment;
 pub mod runs;
 pub mod store;
 pub mod threads;
+pub mod sandbox;
 pub mod uninstall;

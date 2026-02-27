@@ -79,6 +79,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         desc: "Check for updates and upgrade",
     },
     SlashCommand {
+        name: "/sandbox",
+        desc: "List or manage sandboxes",
+    },
+    SlashCommand {
         name: "/do-a-trick",
         desc: "Make the parrot do a trick",
     },
@@ -329,6 +333,12 @@ pub(super) fn handle_terminal_event(app: &mut ChatState, event: Event) -> Action
             if value == "/feedback" || value.starts_with("/feedback ") {
                 let body = value.strip_prefix("/feedback").unwrap_or("").trim();
                 open_feedback(app, body);
+                super::helpers::reset_textarea(app);
+                return Action::None;
+            }
+            if value == "/sandbox" || value.starts_with("/sandbox ") {
+                let args = value.strip_prefix("/sandbox").unwrap_or("").trim();
+                handle_sandbox_command(app, args);
                 super::helpers::reset_textarea(app);
                 return Action::None;
             }
@@ -745,4 +755,73 @@ fn to_textarea_input(key: KeyEvent) -> Option<Input> {
         alt,
         shift,
     })
+}
+
+fn handle_sandbox_command(app: &mut ChatState, args: &str) {
+    use super::ChatMessage;
+
+    // Try to get API key from config
+    let api_key = match crate::config::load() {
+        Ok(cfg) => {
+            let key = if cfg.api_key.is_empty() {
+                std::env::var("LANGSMITH_API_KEY").unwrap_or_default()
+            } else {
+                cfg.api_key
+            };
+            if key.is_empty() {
+                app.messages.push(ChatMessage::Error(
+                    "No API key configured. Set LANGSMITH_API_KEY or run `ailsd context create`."
+                        .to_string(),
+                ));
+                return;
+            }
+            key
+        }
+        Err(e) => {
+            app.messages
+                .push(ChatMessage::Error(format!("Failed to load config: {e}")));
+            return;
+        }
+    };
+
+    let client = match lsandbox::SandboxClient::new(&api_key) {
+        Ok(c) => c,
+        Err(e) => {
+            app.messages
+                .push(ChatMessage::Error(format!("Sandbox client error: {e}")));
+            return;
+        }
+    };
+
+    match args {
+        "" | "list" => {
+            app.messages
+                .push(ChatMessage::System("Loading sandboxes...".to_string()));
+            app.auto_scroll = true;
+
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            app.sandbox_rx = Some(rx);
+            tokio::spawn(async move {
+                let result = client.list_sandboxes().await;
+                let _ = tx.send(result);
+            });
+        }
+        "templates" => {
+            app.messages
+                .push(ChatMessage::System("Loading templates...".to_string()));
+            app.auto_scroll = true;
+
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            app.sandbox_template_rx = Some(rx);
+            tokio::spawn(async move {
+                let result = client.list_templates().await;
+                let _ = tx.send(result);
+            });
+        }
+        _ => {
+            app.messages.push(ChatMessage::System(
+                "Usage: /sandbox [list|templates]".to_string(),
+            ));
+        }
+    }
 }

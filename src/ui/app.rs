@@ -129,6 +129,7 @@ impl TuiApp {
 
     fn poll_screens(&mut self) {
         self.chat.poll_history();
+        self.chat.poll_sandbox();
         self.threads.poll();
         self.assistants.poll();
         self.runs.poll();

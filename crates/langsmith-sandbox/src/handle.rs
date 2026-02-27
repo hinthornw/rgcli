@@ -112,6 +112,48 @@ impl CommandHandle {
                 message: "command already exited".to_string(),
             })
     }
+
+    /// Get a cloneable input sender for use from a separate task.
+    ///
+    /// This allows sending stdin data concurrently while reading output.
+    pub fn input_sender(&self) -> InputSender {
+        InputSender {
+            tx: self.control_tx.clone(),
+        }
+    }
+}
+
+/// A cloneable handle for sending stdin data to a running command.
+///
+/// Obtained via [`CommandHandle::input_sender()`]. Can be sent to another
+/// task to write stdin while the main task reads output.
+#[derive(Clone)]
+pub struct InputSender {
+    tx: mpsc::Sender<ControlMsg>,
+}
+
+impl InputSender {
+    /// Write data to the command's stdin.
+    pub async fn send(&self, data: &str) -> Result<(), SandboxError> {
+        self.tx
+            .send(ControlMsg::Input(data.to_string()))
+            .await
+            .map_err(|_| SandboxError::Operation {
+                operation: "send_input".to_string(),
+                message: "command already exited".to_string(),
+            })
+    }
+
+    /// Send a kill signal.
+    pub async fn kill(&self) -> Result<(), SandboxError> {
+        self.tx
+            .send(ControlMsg::Kill)
+            .await
+            .map_err(|_| SandboxError::Operation {
+                operation: "kill".to_string(),
+                message: "command already exited".to_string(),
+            })
+    }
 }
 
 /// Parameters needed to establish or re-establish a WS execution.

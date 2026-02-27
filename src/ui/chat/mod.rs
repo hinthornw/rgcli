@@ -184,6 +184,12 @@ pub struct ChatState {
     // One-time feedback prompt
     pub(crate) feedback_prompt_shown: bool,
     pub(crate) session_start: Instant,
+
+    // Sandbox async results
+    pub(crate) sandbox_rx:
+        Option<mpsc::UnboundedReceiver<Result<Vec<lsandbox::SandboxInfo>, lsandbox::SandboxError>>>,
+    pub(crate) sandbox_template_rx:
+        Option<mpsc::UnboundedReceiver<Result<Vec<lsandbox::SandboxTemplate>, lsandbox::SandboxError>>>,
 }
 
 impl ChatState {
@@ -236,6 +242,8 @@ impl ChatState {
             history_rx: None,
             feedback_prompt_shown: false,
             session_start: Instant::now(),
+            sandbox_rx: None,
+            sandbox_template_rx: None,
         }
     }
 
@@ -542,6 +550,69 @@ impl ChatState {
                 }
             }
         });
+    }
+
+    /// Poll for sandbox async results.
+    pub fn poll_sandbox(&mut self) {
+        if let Some(rx) = &mut self.sandbox_rx {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(sandboxes) => {
+                        if sandboxes.is_empty() {
+                            self.messages
+                                .push(ChatMessage::System("No sandboxes found.".to_string()));
+                        } else {
+                            self.messages.push(ChatMessage::System(format!(
+                                "─── Sandboxes ({}) ───",
+                                sandboxes.len()
+                            )));
+                            for sb in &sandboxes {
+                                let url = sb.dataplane_url.as_deref().unwrap_or("(no url)");
+                                self.messages.push(ChatMessage::System(format!(
+                                    "  {} [{}] {}",
+                                    sb.name, sb.template_name, url
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.messages
+                            .push(ChatMessage::Error(format!("Sandbox error: {e}")));
+                    }
+                }
+                self.auto_scroll = true;
+                self.sandbox_rx = None;
+            }
+        }
+        if let Some(rx) = &mut self.sandbox_template_rx {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(templates) => {
+                        if templates.is_empty() {
+                            self.messages
+                                .push(ChatMessage::System("No templates found.".to_string()));
+                        } else {
+                            self.messages.push(ChatMessage::System(format!(
+                                "─── Templates ({}) ───",
+                                templates.len()
+                            )));
+                            for t in &templates {
+                                self.messages.push(ChatMessage::System(format!(
+                                    "  {} [{}] cpu={} mem={}",
+                                    t.name, t.image, t.resources.cpu, t.resources.memory
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.messages
+                            .push(ChatMessage::Error(format!("Template error: {e}")));
+                    }
+                }
+                self.auto_scroll = true;
+                self.sandbox_template_rx = None;
+            }
+        }
     }
 
     /// Poll for thread history load completion.

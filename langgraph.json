@@ -1,6 +1,9 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.13",
+  "dockerfile_lines": [
+    "RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config && rm -rf /var/lib/apt/lists/*"
+  ],
   "dependencies": [
     "./demo/langgraph",
     "./crates/langsmith-sandbox",

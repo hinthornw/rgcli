@@ -132,12 +132,40 @@ def _langsmith_endpoint() -> str:
     return "https://api.smith.langchain.com"
 
 
-def _langsmith_template_name() -> str | None:
+def _langsmith_template_name() -> str:
     raw = os.getenv("LANGSMITH_SANDBOX_TEMPLATE")
     if raw is None:
-        return None
+        return "ssap-default"
     value = raw.strip()
-    return value or None
+    if not value:
+        return "ssap-default"
+    return value
+
+
+def _auto_create_template_enabled() -> bool:
+    raw = os.getenv("SSAP_AUTO_CREATE_TEMPLATE")
+    if raw is None:
+        return True
+    return _truthy(raw)
+
+
+def _template_create_body(template_name: str) -> dict[str, Any]:
+    image = os.getenv("SSAP_TEMPLATE_IMAGE", "python:3.12-slim").strip()
+
+    body: dict[str, Any] = {
+        "name": template_name,
+        "image": image,
+    }
+    cpu = os.getenv("SSAP_TEMPLATE_CPU", "").strip()
+    memory = os.getenv("SSAP_TEMPLATE_MEMORY", "").strip()
+    storage = os.getenv("SSAP_TEMPLATE_STORAGE", "").strip()
+    if cpu:
+        body["cpu"] = cpu
+    if memory:
+        body["memory"] = memory
+    if storage:
+        body["storage"] = storage
+    return body
 
 
 async def _langsmith_list_template_names() -> list[str]:
@@ -158,6 +186,39 @@ async def _langsmith_list_template_names() -> list[str]:
         raise
     except Exception as exc:
         raise _error(503, "BACKEND_UNAVAILABLE", f"Failed to list templates: {exc}") from exc
+
+
+async def _langsmith_create_template(template_name: str) -> None:
+    if RustSandboxClient is None:
+        raise RuntimeError("lsandbox_py is required to auto-create templates")
+    key = _langsmith_api_key()
+    endpoint = _langsmith_endpoint()
+    body = _template_create_body(template_name)
+    client = RustSandboxClient(api_key=key, endpoint=endpoint)
+    try:
+        await client.create_template(
+            name=str(body["name"]),
+            image=str(body["image"]),
+            cpu=body.get("cpu"),
+            memory=body.get("memory"),
+            storage=body.get("storage"),
+        )
+        return
+    except Exception as exc:
+        message = str(exc).lower()
+        if "409" in message or "already exists" in message or "conflict" in message:
+            return
+        raise RuntimeError(f"create template failed: {exc}") from exc
+
+
+async def _ensure_template_on_startup() -> None:
+    if not _auto_create_template_enabled():
+        return
+    template_name = _langsmith_template_name()
+    names = await _langsmith_list_template_names()
+    if template_name in names:
+        return
+    await _langsmith_create_template(template_name)
 
 
 def _error(status: int, code: str, message: str) -> HTTPException:
@@ -472,11 +533,6 @@ async def _langsmith_create_box(name_hint: str | None = None) -> dict:
     key = _langsmith_api_key()
     endpoint = _langsmith_endpoint()
     template_name = _langsmith_template_name()
-    if template_name is None:
-        template_names = await _langsmith_list_template_names()
-        if not template_names:
-            raise _error(503, "BACKEND_UNAVAILABLE", "No sandbox templates available")
-        template_name = template_names[0]
 
     client = RustSandboxClient(api_key=key, endpoint=endpoint)
     try:
@@ -795,8 +851,16 @@ async def _handle_http_exception(_: Request, exc: HTTPException) -> JSONResponse
     )
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(_: Starlette):
+    if _enabled():
+        await _ensure_template_on_startup()
+    yield
+
+
 app = Starlette(
     routes=routes,
+    lifespan=_lifespan,
     exception_handlers={
         HTTPException: _handle_http_exception,
     },

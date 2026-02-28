@@ -16,6 +16,10 @@ The second command installs the local Rust PyO3 extension `lsandbox-py`.
 export LANGSMITH_API_KEY="..."
 # Optional hardening: if set, only these bearer tokens can create/manage SSAP sessions
 export SSAP_CLIENT_BEARER_TOKENS="dev-client"
+# Optional overrides for startup template bootstrap (enabled by default)
+# export LANGSMITH_SANDBOX_TEMPLATE="ssap-default"
+# export SSAP_TEMPLATE_IMAGE="python:3.12-slim"
+# export SSAP_AUTO_CREATE_TEMPLATE="false"   # opt out
 ```
 
 ## Run
@@ -28,8 +32,9 @@ uv run --project demo/langgraph langgraph dev --config ./langgraph.json --no-bro
 ## Notes
 
 - This is a development-only SSAP MVP scaffold.
-- `LANGSMITH_API_KEY` must be set for session creation and relay mode endpoints.
-- `LANGSMITH_SANDBOX_TEMPLATE` is optional. If unset, the app auto-selects the first available template from `GET /v2/sandboxes/templates`.
+- One of `LANGSMITH_API_KEY`, `LANGGRAPH_API_KEY`, or `LANGCHAIN_API_KEY` must be set for session creation and relay mode endpoints.
+- Startup ensures a sandbox template exists by default. Defaults: `LANGSMITH_SANDBOX_TEMPLATE=ssap-default`, `SSAP_TEMPLATE_IMAGE=python:3.12-slim`.
+- Set `SSAP_AUTO_CREATE_TEMPLATE=false` to disable auto-create and rely only on existing templates.
 - Sandbox control-plane operations (template list/create/get) are executed through the Rust client via async-native `lsandbox_py` methods.
 - Server auth mode is `noop` in this config so relay WebSockets work with current LangGraph middleware behavior.
 - `./auth.py` is kept in-repo for future re-enable once custom-auth + websocket scope handling is fixed upstream.

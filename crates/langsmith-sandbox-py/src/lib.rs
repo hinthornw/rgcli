@@ -1,4 +1,6 @@
-use lsandbox::{RunOpts, SandboxClient, SandboxError, SandboxInfo};
+use lsandbox::{
+    CreateTemplate, RunOpts, SandboxClient, SandboxError, SandboxInfo, SandboxTemplate,
+};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -27,6 +29,21 @@ fn execution_result_to_pydict(
     dict.set_item("stdout", &result.stdout)?;
     dict.set_item("stderr", &result.stderr)?;
     dict.set_item("exit_code", result.exit_code)?;
+    Ok(dict.unbind())
+}
+
+fn sandbox_template_to_pydict(py: Python<'_>, template: &SandboxTemplate) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", &template.name)?;
+    dict.set_item("image", &template.image)?;
+    let resources = PyDict::new(py);
+    resources.set_item("cpu", &template.resources.cpu)?;
+    resources.set_item("memory", &template.resources.memory)?;
+    resources.set_item("storage", &template.resources.storage)?;
+    dict.set_item("resources", resources)?;
+    dict.set_item("id", &template.id)?;
+    dict.set_item("created_at", &template.created_at)?;
+    dict.set_item("updated_at", &template.updated_at)?;
     Ok(dict.unbind())
 }
 
@@ -65,6 +82,31 @@ impl PySandboxClient {
         future_into_py(py, async move {
             let templates = client.list_templates().await.map_err(py_err)?;
             Ok(templates.into_iter().map(|t| t.name).collect::<Vec<_>>())
+        })
+    }
+
+    #[pyo3(signature = (name, image, cpu=None, memory=None, storage=None))]
+    fn create_template<'py>(
+        &self,
+        py: Python<'py>,
+        name: String,
+        image: String,
+        cpu: Option<String>,
+        memory: Option<String>,
+        storage: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.inner.clone();
+        future_into_py(py, async move {
+            let spec = CreateTemplate {
+                name,
+                image,
+                cpu,
+                memory,
+                storage,
+                volume_mounts: None,
+            };
+            let template = client.create_template(&spec).await.map_err(py_err)?;
+            Python::with_gil(|py| sandbox_template_to_pydict(py, &template))
         })
     }
 

@@ -103,14 +103,15 @@ def _caps() -> list[str]:
 
 
 def _langsmith_api_key() -> str:
-    key = os.getenv("LANGSMITH_API_KEY", "").strip()
-    if not key:
-        raise _error(
-            503,
-            "BACKEND_UNAVAILABLE",
-            "LANGSMITH_API_KEY is required for relay mode",
-        )
-    return key
+    for env_name in ("LANGSMITH_API_KEY", "LANGGRAPH_API_KEY", "LANGCHAIN_API_KEY"):
+        key = os.getenv(env_name, "").strip()
+        if key:
+            return key
+    raise _error(
+        503,
+        "BACKEND_UNAVAILABLE",
+        "One of LANGSMITH_API_KEY, LANGGRAPH_API_KEY, or LANGCHAIN_API_KEY is required for relay mode",
+    )
 
 
 def _langsmith_control_base() -> str:

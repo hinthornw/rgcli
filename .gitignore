@@ -6,3 +6,5 @@ ailsd-export-*.md
 __pycache__/
 *.egg-info/
 .langgraph_api/
+.ailsd.yaml
+.env
